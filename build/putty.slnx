@@ -1,0 +1,393 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Solution>
+	<Configurations>
+		<BuildType Name="Debug"/>
+		<BuildType Name="Release"/>
+		<BuildType Name="MinSizeRel"/>
+		<BuildType Name="RelWithDebInfo"/>
+		<Platform Name="x64"/>
+	</Configurations>
+	<Project Path="agent.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="b0180974-280c-34ec-89fe-d04ba584040e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="all-backends.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="a99b3f8b-2db1-3c40-bbae-029871dd6ffa">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="bidi_gettype.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="167678ac-e2db-36b0-900b-8b94d0ae549d">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="guiterminal.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="bidi_test.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="0e86a1e0-6856-32d6-8784-68fdc0fc66f3">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="guiterminal.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="check_git_commit.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="12bbbe68-66fa-3658-86ed-8a2d33bbe7c2">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="cmake_commit_c.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="d7116e25-b51b-31a0-b235-be46cd27fd3d">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="check_git_commit.vcxproj"/>
+	</Project>
+	<Project Path="cmosh/cmosh.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="46879d48-5b5c-3a6e-b4e2-7d4b7ac8da72">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="cmosh/cmosh_core.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="cmosh/cmosh_core.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="aebab333-042d-3f6b-b4e1-251b18e76987">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="console.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="f1ad4f82-9bb1-3af9-96cd-acc2dc48477b">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="crypto.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="bab42b0e-dae5-3edd-871a-3a186a32bdcb">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="crypto/object_lib_HAVE_AES_NI.vcxproj"/>
+		<BuildDependency Project="crypto/object_lib_HAVE_CLMUL.vcxproj"/>
+		<BuildDependency Project="crypto/object_lib_HAVE_SHA_NI.vcxproj"/>
+	</Project>
+	<Project Path="doc/doc.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="01141c00-ecf6-3a2b-b11c-e6c6fbc4d782">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="doc/manpages.vcxproj"/>
+		<Build Solution="Debug|*" Project="false"/>
+		<Build Solution="Release|*" Project="false"/>
+		<Build Solution="MinSizeRel|*" Project="false"/>
+		<Build Solution="RelWithDebInfo|*" Project="false"/>
+	</Project>
+	<Project Path="eventloop.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5a17b425-6570-34cd-9a59-361959acd9ff">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="windows/handle-io.vcxproj"/>
+	</Project>
+	<Project Path="generated_licence_h.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="b82c8ea7-6481-3d86-9f44-36b4ea62142e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="windows/guimisc.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="8586965b-442c-36fe-8c15-e91a6b133ccb">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="guiterminal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="e5bf3bea-02f3-35d0-ac6b-e635144e435a">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="generated_licence_h.vcxproj"/>
+		<BuildDependency Project="logging.vcxproj"/>
+	</Project>
+	<Project Path="windows/handle-io.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="ca741778-d552-3316-8933-ca7d4ad0242b">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="keygen.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="29784760-9bb1-3650-9dad-6929c816834b">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="logging.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="899e054d-dad2-32e9-88df-beb4ef10604e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="doc/manpages.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="cc700593-eab5-3f56-ba76-0a3930087ca4">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="network.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="f5d270c1-56ad-30c5-bcfb-cc9d8b016faf">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="windows/handle-io.vcxproj"/>
+		<BuildDependency Project="logging.vcxproj"/>
+	</Project>
+	<Project Path="noterminal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="21f88172-2f64-35fd-962c-3e0daabefaa1">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="crypto/object_lib_HAVE_AES_NI.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="571361b5-48d6-32b0-b8c5-bdbddd76e1b9">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="crypto/object_lib_HAVE_CLMUL.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="bcdb964e-19ff-385f-8ae0-4ccf464a6a00">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="crypto/object_lib_HAVE_SHA_NI.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="4bbec632-7023-3aff-9699-dc9e15bcd020">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="otherbackends.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="2d9faa1d-e2d3-3dda-b1b6-970a4a339ca0">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="all-backends.vcxproj"/>
+		<BuildDependency Project="logging.vcxproj"/>
+	</Project>
+	<Project Path="windows/pageant.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="cf8560ee-7f01-3ce4-87ca-64d7d053eb6a">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="agent.vcxproj"/>
+		<BuildDependency Project="crypto.vcxproj"/>
+		<BuildDependency Project="eventloop.vcxproj"/>
+		<BuildDependency Project="generated_licence_h.vcxproj"/>
+		<BuildDependency Project="windows/guimisc.vcxproj"/>
+		<BuildDependency Project="network.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="plink.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="d56924a0-dd66-3451-91e7-fe311bbe748b">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="console.vcxproj"/>
+		<BuildDependency Project="crypto.vcxproj"/>
+		<BuildDependency Project="eventloop.vcxproj"/>
+		<BuildDependency Project="generated_licence_h.vcxproj"/>
+		<BuildDependency Project="network.vcxproj"/>
+		<BuildDependency Project="noterminal.vcxproj"/>
+		<BuildDependency Project="otherbackends.vcxproj"/>
+		<BuildDependency Project="plink-be-list.vcxproj"/>
+		<BuildDependency Project="settings.vcxproj"/>
+		<BuildDependency Project="ssh/sshclient.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="plink-be-list.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="6e3671ed-8b5a-3ae9-a114-f6c58427ed19">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="pscp.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="4a8fbb8d-0d20-32f0-af62-03e0df590d27">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="console.vcxproj"/>
+		<BuildDependency Project="crypto.vcxproj"/>
+		<BuildDependency Project="eventloop.vcxproj"/>
+		<BuildDependency Project="generated_licence_h.vcxproj"/>
+		<BuildDependency Project="network.vcxproj"/>
+		<BuildDependency Project="pscp-be-list.vcxproj"/>
+		<BuildDependency Project="settings.vcxproj"/>
+		<BuildDependency Project="sftpclient.vcxproj"/>
+		<BuildDependency Project="ssh/sshclient.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="pscp-be-list.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="3db480aa-6bff-3c74-94ab-e1630e8ab7b3">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="psftp.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="476ce571-fa61-3606-a107-0a88e3bbf002">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="console.vcxproj"/>
+		<BuildDependency Project="crypto.vcxproj"/>
+		<BuildDependency Project="eventloop.vcxproj"/>
+		<BuildDependency Project="generated_licence_h.vcxproj"/>
+		<BuildDependency Project="network.vcxproj"/>
+		<BuildDependency Project="psftp-be-list.vcxproj"/>
+		<BuildDependency Project="settings.vcxproj"/>
+		<BuildDependency Project="sftpclient.vcxproj"/>
+		<BuildDependency Project="ssh/sshclient.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="psftp-be-list.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="fe560c58-3a0d-349b-92fc-969a03cda4a8">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="psocks.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="cae1619e-c627-3658-9cff-e24635fb9dbc">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="console.vcxproj"/>
+		<BuildDependency Project="eventloop.vcxproj"/>
+		<BuildDependency Project="network.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="windows/pterm.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="4f2e6811-6b5c-39a1-b2a7-cf69f8c679b2">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="eventloop.vcxproj"/>
+		<BuildDependency Project="generated_licence_h.vcxproj"/>
+		<BuildDependency Project="windows/guimisc.vcxproj"/>
+		<BuildDependency Project="guiterminal.vcxproj"/>
+		<BuildDependency Project="network.vcxproj"/>
+		<BuildDependency Project="windows/pterm-be-list.vcxproj"/>
+		<BuildDependency Project="settings.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="windows/pterm-be-list.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="a4082a38-f432-3a78-abe3-ca3d61331410">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="windows/putty.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="86d6959a-0fa0-3f82-9734-84089f0736bf">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="crypto.vcxproj"/>
+		<BuildDependency Project="eventloop.vcxproj"/>
+		<BuildDependency Project="generated_licence_h.vcxproj"/>
+		<BuildDependency Project="windows/guimisc.vcxproj"/>
+		<BuildDependency Project="guiterminal.vcxproj"/>
+		<BuildDependency Project="network.vcxproj"/>
+		<BuildDependency Project="otherbackends.vcxproj"/>
+		<BuildDependency Project="windows/putty-be-list.vcxproj"/>
+		<BuildDependency Project="settings.vcxproj"/>
+		<BuildDependency Project="ssh/sshclient.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="windows/putty-be-list.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="931ab7fb-9849-3604-a34b-f103e366434e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="windows/puttygen.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="a1323499-51d8-3a90-a0ad-07ac6d8d9360">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="crypto.vcxproj"/>
+		<BuildDependency Project="generated_licence_h.vcxproj"/>
+		<BuildDependency Project="windows/guimisc.vcxproj"/>
+		<BuildDependency Project="keygen.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="windows/puttytel.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="4eaa4872-d6dc-3f76-b171-282f1c6dad61">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="eventloop.vcxproj"/>
+		<BuildDependency Project="generated_licence_h.vcxproj"/>
+		<BuildDependency Project="windows/guimisc.vcxproj"/>
+		<BuildDependency Project="guiterminal.vcxproj"/>
+		<BuildDependency Project="network.vcxproj"/>
+		<BuildDependency Project="otherbackends.vcxproj"/>
+		<BuildDependency Project="windows/puttytel-be-list.vcxproj"/>
+		<BuildDependency Project="settings.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="windows/puttytel-be-list.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="83d675f4-77c9-3adb-a111-009b0478788c">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="settings.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="be050e58-6b22-33f1-bfbe-2629d74f7dfa">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="sftpclient.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="b47d266f-c9a8-307d-9732-2ac18f2f74f2">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="ssh/sftpcommon.vcxproj"/>
+	</Project>
+	<Project Path="ssh/sftpcommon.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="9c06b60c-228e-3212-b400-7aa2442a7f72">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="ssh/sshclient.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="27c768a8-def2-36e7-8dc2-eac9492403bc">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="all-backends.vcxproj"/>
+		<BuildDependency Project="logging.vcxproj"/>
+		<BuildDependency Project="ssh/sshcommon.vcxproj"/>
+	</Project>
+	<Project Path="ssh/sshcommon.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="91ec72d4-5cf5-3cb8-a669-8178302fb95a">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="ssh/sshserver.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5a561306-8c4f-3484-adf8-d2aeb9cb8f9e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="ssh/sftpcommon.vcxproj"/>
+		<BuildDependency Project="ssh/sshcommon.vcxproj"/>
+	</Project>
+	<Project Path="test_cert_expr.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="3c58ba0a-9fb0-3506-8d58-6f588a8c4571">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="cmosh/test_cmosh.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="4f9deef0-988e-3f8c-b00c-d30f6a16019d">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="cmosh/cmosh_core.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="test_conf.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1a007bb2-3688-37ee-8393-59f2ca4e69b3">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="crypto.vcxproj"/>
+		<BuildDependency Project="network.vcxproj"/>
+		<BuildDependency Project="otherbackends.vcxproj"/>
+		<BuildDependency Project="settings.vcxproj"/>
+		<BuildDependency Project="ssh/sshclient.vcxproj"/>
+		<BuildDependency Project="test_conf-be-list.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="test_conf-be-list.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="a0c09105-ea76-35a4-82fb-bca548a8f3aa">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+	</Project>
+	<Project Path="test_decode_utf8.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="87b3f07e-14df-35bc-833e-340c49924ee9">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="test_host_strfoo.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="07e1fd24-04f7-3395-94f0-c647e496ee5e">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="windows/test_lineedit.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="b400995f-e7a2-385a-b4af-3190e74e19b5">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="eventloop.vcxproj"/>
+		<BuildDependency Project="guiterminal.vcxproj"/>
+		<BuildDependency Project="settings.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="windows/test_screenshot.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="6246a3ed-58e9-3b15-b99b-bad0e772a810">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="windows/test_split_into_argv.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="8667a140-c3cd-30ad-b7f5-e052a1194bb7">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="windows/test_terminal.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="bd70e18a-28b1-31e9-b621-f42719b62261">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="eventloop.vcxproj"/>
+		<BuildDependency Project="guiterminal.vcxproj"/>
+		<BuildDependency Project="settings.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="test_tree234.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="c720e286-3205-3fbd-b47b-edb2ea1f0760">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="test_unicode_norm.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="6ca072cd-d76e-33ee-82a7-b41679515407">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="test_wildcard.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="0643ba86-f086-3ab9-8f8c-8fd7ad534855">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="testcrypt.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="c2adbe2d-a6b0-32d0-9a51-7b6e402395eb">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="crypto.vcxproj"/>
+		<BuildDependency Project="keygen.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
+	<Project Path="utils.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="771d2d05-4a1e-395e-a91c-64abd1649e5f">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="cmake_commit_c.vcxproj"/>
+	</Project>
+	<Folder Name="/CMakePredefinedTargets/">
+		<Project Path="ALL_BUILD.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="5c876e21-4e7f-329d-9da6-4cd95ef0cfe1" DefaultStartup="true">
+			<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+			<BuildDependency Project="agent.vcxproj"/>
+			<BuildDependency Project="all-backends.vcxproj"/>
+			<BuildDependency Project="bidi_gettype.vcxproj"/>
+			<BuildDependency Project="bidi_test.vcxproj"/>
+			<BuildDependency Project="cmosh/cmosh.vcxproj"/>
+			<BuildDependency Project="cmosh/cmosh_core.vcxproj"/>
+			<BuildDependency Project="console.vcxproj"/>
+			<BuildDependency Project="crypto.vcxproj"/>
+			<BuildDependency Project="eventloop.vcxproj"/>
+			<BuildDependency Project="windows/guimisc.vcxproj"/>
+			<BuildDependency Project="guiterminal.vcxproj"/>
+			<BuildDependency Project="windows/handle-io.vcxproj"/>
+			<BuildDependency Project="keygen.vcxproj"/>
+			<BuildDependency Project="logging.vcxproj"/>
+			<BuildDependency Project="doc/manpages.vcxproj"/>
+			<BuildDependency Project="network.vcxproj"/>
+			<BuildDependency Project="noterminal.vcxproj"/>
+			<BuildDependency Project="crypto/object_lib_HAVE_AES_NI.vcxproj"/>
+			<BuildDependency Project="crypto/object_lib_HAVE_CLMUL.vcxproj"/>
+			<BuildDependency Project="crypto/object_lib_HAVE_SHA_NI.vcxproj"/>
+			<BuildDependency Project="otherbackends.vcxproj"/>
+			<BuildDependency Project="windows/pageant.vcxproj"/>
+			<BuildDependency Project="plink.vcxproj"/>
+			<BuildDependency Project="plink-be-list.vcxproj"/>
+			<BuildDependency Project="pscp.vcxproj"/>
+			<BuildDependency Project="pscp-be-list.vcxproj"/>
+			<BuildDependency Project="psftp.vcxproj"/>
+			<BuildDependency Project="psftp-be-list.vcxproj"/>
+			<BuildDependency Project="psocks.vcxproj"/>
+			<BuildDependency Project="windows/pterm.vcxproj"/>
+			<BuildDependency Project="windows/pterm-be-list.vcxproj"/>
+			<BuildDependency Project="windows/putty.vcxproj"/>
+			<BuildDependency Project="windows/putty-be-list.vcxproj"/>
+			<BuildDependency Project="windows/puttygen.vcxproj"/>
+			<BuildDependency Project="windows/puttytel.vcxproj"/>
+			<BuildDependency Project="windows/puttytel-be-list.vcxproj"/>
+			<BuildDependency Project="settings.vcxproj"/>
+			<BuildDependency Project="sftpclient.vcxproj"/>
+			<BuildDependency Project="ssh/sftpcommon.vcxproj"/>
+			<BuildDependency Project="ssh/sshclient.vcxproj"/>
+			<BuildDependency Project="ssh/sshcommon.vcxproj"/>
+			<BuildDependency Project="ssh/sshserver.vcxproj"/>
+			<BuildDependency Project="test_cert_expr.vcxproj"/>
+			<BuildDependency Project="cmosh/test_cmosh.vcxproj"/>
+			<BuildDependency Project="test_conf.vcxproj"/>
+			<BuildDependency Project="test_conf-be-list.vcxproj"/>
+			<BuildDependency Project="test_decode_utf8.vcxproj"/>
+			<BuildDependency Project="test_host_strfoo.vcxproj"/>
+			<BuildDependency Project="windows/test_lineedit.vcxproj"/>
+			<BuildDependency Project="windows/test_screenshot.vcxproj"/>
+			<BuildDependency Project="windows/test_split_into_argv.vcxproj"/>
+			<BuildDependency Project="windows/test_terminal.vcxproj"/>
+			<BuildDependency Project="test_tree234.vcxproj"/>
+			<BuildDependency Project="test_unicode_norm.vcxproj"/>
+			<BuildDependency Project="test_wildcard.vcxproj"/>
+			<BuildDependency Project="testcrypt.vcxproj"/>
+			<BuildDependency Project="utils.vcxproj"/>
+			<Build Solution="Debug|*" Project="false"/>
+			<Build Solution="Release|*" Project="false"/>
+			<Build Solution="MinSizeRel|*" Project="false"/>
+			<Build Solution="RelWithDebInfo|*" Project="false"/>
+		</Project>
+		<Project Path="ZERO_CHECK.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="68a18851-ef17-3b76-9c1c-853f02f3ab7c"/>
+	</Folder>
+</Solution>
