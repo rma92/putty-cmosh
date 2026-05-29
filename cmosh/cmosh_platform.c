@@ -788,14 +788,18 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                 goto out_socket;
                             }
                             if (key_len) {
+                                uint64_t old_client_state;
+
                                 if (cmosh_input_append(&input, keys,
                                                        key_len) != 0 ||
-                                    cmosh_input_pending_diff(
-                                        &input, diffbuf, sizeof(diffbuf),
-                                        &loop_diff_len) != 0)
+                                    cmosh_encode_user_keystroke_message(
+                                        keys, key_len, diffbuf,
+                                        sizeof(diffbuf), &loop_diff_len) !=
+                                        0)
                                     goto out_socket;
+                                old_client_state = input.current - 1;
                                 if (cmosh_make_packet(
-                                        key, send_seq++, input.acked,
+                                        key, send_seq++, old_client_state,
                                         input.current, server_state, diffbuf,
                                         loop_diff_len, echo_ts, packet,
                                         sizeof(packet), &packet_len) != 0)
@@ -859,23 +863,11 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                         goto out_socket;
                                     }
                                     if (ti.new_num == server_state) {
-                                        const unsigned char *pending = NULL;
-                                        size_t pending_len = 0;
-
-                                        if (input.current > input.acked) {
-                                            if (cmosh_input_pending_diff(
-                                                    &input, diffbuf,
-                                                    sizeof(diffbuf),
-                                                    &loop_diff_len) != 0)
-                                                goto out_socket;
-                                            pending = diffbuf;
-                                            pending_len = loop_diff_len;
-                                        }
                                         if (cmosh_make_packet(
                                                 key, send_seq++,
-                                                input.acked, input.current,
-                                                server_state, pending,
-                                                pending_len, echo_ts, packet,
+                                                input.acked, input.acked,
+                                                server_state, NULL, 0,
+                                                echo_ts, packet,
                                                 sizeof(packet), &packet_len) !=
                                             0)
                                             goto out_socket;
@@ -907,10 +899,16 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                 if (send(s, (const char *)packet,
                                          (int)packet_len, 0) == SOCKET_ERROR)
                                     goto out_socket;
-                                if (verbose)
+                                if (verbose) {
                                     fprintf(stderr,
-                                            "cmosh: sent keepalive ack=%llu\n",
-                                            (unsigned long long)server_state);
+                                            "cmosh: sent keepalive ack=%llu "
+                                            "client old=%llu new=%llu "
+                                            "pending=%u\n",
+                                            (unsigned long long)server_state,
+                                            (unsigned long long)input.acked,
+                                            (unsigned long long)input.current,
+                                            (unsigned)pending_len);
+                                }
                             }
                         }
                     }
