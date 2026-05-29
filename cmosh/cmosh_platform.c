@@ -20,11 +20,16 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#ifndef DISABLE_NEWLINE_AUTO_RETURN
+#define DISABLE_NEWLINE_AUTO_RETURN 0x0008
+#endif
 #define popen _popen
 #define pclose _pclose
 #define cmosh_close_socket closesocket
 typedef SOCKET cmosh_socket_t;
+static DWORD saved_output_mode;
 static DWORD saved_input_mode;
+static int have_saved_output_mode;
 static int have_saved_input_mode;
 #else
 #include <errno.h>
@@ -60,7 +65,10 @@ void cmosh_console_setup(void)
     _setmode(_fileno(stderr), _O_BINARY);
 
     if (out != INVALID_HANDLE_VALUE && GetConsoleMode(out, &mode)) {
-        mode |= ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+        saved_output_mode = mode;
+        have_saved_output_mode = 1;
+        mode |= ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING |
+                DISABLE_NEWLINE_AUTO_RETURN;
         SetConsoleMode(out, mode);
     }
     if (in != INVALID_HANDLE_VALUE && GetConsoleMode(in, &mode)) {
@@ -89,8 +97,11 @@ void cmosh_console_setup(void)
 static void cmosh_console_restore(void)
 {
 #ifdef _WIN32
+    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
     HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
 
+    if (have_saved_output_mode && out != INVALID_HANDLE_VALUE)
+        SetConsoleMode(out, saved_output_mode);
     if (have_saved_input_mode && in != INVALID_HANDLE_VALUE)
         SetConsoleMode(in, saved_input_mode);
 #else
@@ -837,6 +848,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                         uint64_t send_seq = 3;
                         unsigned int echo_ts =
                             ((unsigned)plain[0] << 8) | plain[1];
+                        unsigned int last_cols = cols, last_rows = rows;
                         int idle = 0;
 
                         cmosh_input_init(&input, ti.ack_num);
@@ -845,6 +857,37 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                             size_t key_len = 0, loop_diff_len = 0;
                             int sent = 0;
                             uint64_t now_ms = cmosh_now_ms();
+                            unsigned int cur_cols, cur_rows;
+
+                            cmosh_console_size(&cur_cols, &cur_rows);
+                            if ((cur_cols != last_cols ||
+                                 cur_rows != last_rows) &&
+                                cmosh_encode_user_resize_message(
+                                    cur_cols, cur_rows, diffbuf,
+                                    sizeof(diffbuf), &loop_diff_len) == 0) {
+                                uint64_t old_client_state = input.current;
+
+                                input.current++;
+                                if (cmosh_make_packet(
+                                        key, send_seq++, old_client_state,
+                                        input.current, server_state, diffbuf,
+                                        loop_diff_len, echo_ts, packet,
+                                        sizeof(packet), &packet_len) != 0)
+                                    goto out_socket;
+                                if (send(s, (const char *)packet,
+                                         (int)packet_len, 0) == SOCKET_ERROR)
+                                    goto out_socket;
+                                last_cols = cur_cols;
+                                last_rows = cur_rows;
+                                sent = 1;
+                                if (verbose)
+                                    fprintf(stderr,
+                                            "cmosh: sent resize %ux%u "
+                                            "client state=%llu\n",
+                                            cur_cols, cur_rows,
+                                            (unsigned long long)
+                                                input.current);
+                            }
 
                             cmosh_console_read(keys, sizeof(keys), &key_len);
                             if (key_len &&
