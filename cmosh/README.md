@@ -32,7 +32,8 @@ Current implemented pieces:
   stdout.
 - Bounded bootstrap has been replaced by a simple session loop that receives
   host output, sends keystrokes, sends periodic ACK keepalives, and exits on
-  Ctrl+].
+  Ctrl+]. The initial resize uses the current console size; live resize updates
+  are deferred until the client state model is more complete.
 - Normal mode is intended to show only terminal I/O. `--verbose` enables the
   bootstrap and protocol trace.
 - Windows console output enables virtual-terminal processing before entering

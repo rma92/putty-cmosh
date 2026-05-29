@@ -18,12 +18,15 @@
 #define pclose _pclose
 #define cmosh_close_socket closesocket
 typedef SOCKET cmosh_socket_t;
+static DWORD saved_input_mode;
+static int have_saved_input_mode;
 #else
 #include <errno.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/time.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #define INVALID_SOCKET (-1)
 #define SOCKET_ERROR (-1)
@@ -40,12 +43,30 @@ void cmosh_console_setup(void)
 {
 #ifdef _WIN32
     HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
     DWORD mode;
 
     if (out != INVALID_HANDLE_VALUE && GetConsoleMode(out, &mode)) {
         mode |= ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
         SetConsoleMode(out, mode);
     }
+    if (in != INVALID_HANDLE_VALUE && GetConsoleMode(in, &mode)) {
+        saved_input_mode = mode;
+        have_saved_input_mode = 1;
+        mode &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
+        mode |= ENABLE_PROCESSED_INPUT;
+        SetConsoleMode(in, mode);
+    }
+#endif
+}
+
+static void cmosh_console_restore(void)
+{
+#ifdef _WIN32
+    HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+
+    if (have_saved_input_mode && in != INVALID_HANDLE_VALUE)
+        SetConsoleMode(in, saved_input_mode);
 #endif
 }
 
@@ -84,8 +105,8 @@ static int cmosh_console_read(unsigned char *buf, size_t buflen, size_t *len)
         int c = _getch();
         if (c == 0 || c == 0xe0)
             continue;
-        if (c == '\r')
-            c = '\n';
+        if (c == '\b')
+            c = 0x7f;
         buf[(*len)++] = (unsigned char)c;
     }
     return 0;
@@ -153,7 +174,7 @@ static int cmosh_decode_packet(const unsigned char key[16],
                                struct cmosh_transport_instruction *ti,
                                unsigned int *timestamp, uint64_t *seq)
 {
-    unsigned char plain[CMOSH_MAX_PACKET], decompressed[1024];
+    unsigned char plain[CMOSH_MAX_PACKET], decompressed[8192];
     size_t plain_len, decompressed_len;
     struct cmosh_fragment frag;
 
@@ -185,6 +206,35 @@ static int append_quoted(char *buf, size_t buflen, size_t *pos, const char *s)
     return 0;
 }
 
+static void cmosh_console_size(unsigned int *cols, unsigned int *rows)
+{
+    *cols = 80;
+    *rows = 24;
+#ifdef _WIN32
+    {
+        HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+        CONSOLE_SCREEN_BUFFER_INFO csbi;
+
+        if (out != INVALID_HANDLE_VALUE &&
+            GetConsoleScreenBufferInfo(out, &csbi)) {
+            *cols = (unsigned int)(csbi.srWindow.Right -
+                                   csbi.srWindow.Left + 1);
+            *rows = (unsigned int)(csbi.srWindow.Bottom -
+                                   csbi.srWindow.Top + 1);
+        }
+    }
+#else
+    {
+        struct winsize ws;
+
+        if (ioctl(1, TIOCGWINSZ, &ws) == 0 && ws.ws_col && ws.ws_row) {
+            *cols = ws.ws_col;
+            *rows = ws.ws_row;
+        }
+    }
+#endif
+}
+
 static int cmosh_contains_exit_key(const unsigned char *buf, size_t len)
 {
     size_t i;
@@ -194,6 +244,106 @@ static int cmosh_contains_exit_key(const unsigned char *buf, size_t len)
             return 1;
     }
     return 0;
+}
+
+#define CMOSH_INPUT_MAX_RECORDS 128
+#define CMOSH_INPUT_MAX_BYTES 480
+
+struct cmosh_input_record {
+    uint64_t state;
+    size_t off;
+    size_t len;
+};
+
+struct cmosh_input_state {
+    uint64_t acked;
+    uint64_t current;
+    unsigned char bytes[CMOSH_INPUT_MAX_BYTES];
+    size_t bytes_len;
+    struct cmosh_input_record records[CMOSH_INPUT_MAX_RECORDS];
+    size_t nrecords;
+};
+
+static void cmosh_input_init(struct cmosh_input_state *st,
+                             uint64_t initial_state)
+{
+    memset(st, 0, sizeof(*st));
+    st->acked = initial_state;
+    st->current = initial_state;
+}
+
+static int cmosh_input_append(struct cmosh_input_state *st,
+                              const unsigned char *keys, size_t keys_len)
+{
+    struct cmosh_input_record *rec;
+
+    if (!keys_len)
+        return 0;
+    if (st->nrecords >= CMOSH_INPUT_MAX_RECORDS ||
+        keys_len > sizeof(st->bytes) - st->bytes_len)
+        return -1;
+
+    st->current++;
+    rec = &st->records[st->nrecords++];
+    rec->state = st->current;
+    rec->off = st->bytes_len;
+    rec->len = keys_len;
+    memcpy(st->bytes + st->bytes_len, keys, keys_len);
+    st->bytes_len += keys_len;
+    return 0;
+}
+
+static void cmosh_input_note_ack(struct cmosh_input_state *st, uint64_t acked)
+{
+    size_t cut = 0, cut_bytes, i;
+
+    if (acked > st->current)
+        acked = st->current;
+    if (acked <= st->acked)
+        return;
+    st->acked = acked;
+    while (cut < st->nrecords && st->records[cut].state <= acked)
+        cut++;
+    if (!cut)
+        return;
+
+    cut_bytes = st->records[cut - 1].off + st->records[cut - 1].len;
+    if (cut_bytes < st->bytes_len)
+        memmove(st->bytes, st->bytes + cut_bytes, st->bytes_len - cut_bytes);
+    st->bytes_len -= cut_bytes;
+
+    for (i = cut; i < st->nrecords; i++) {
+        st->records[i - cut] = st->records[i];
+        st->records[i - cut].off -= cut_bytes;
+    }
+    st->nrecords -= cut;
+}
+
+static int cmosh_input_pending_diff(struct cmosh_input_state *st,
+                                    unsigned char *diffbuf,
+                                    size_t diffbuf_len, size_t *diff_len)
+{
+    unsigned char keys[CMOSH_INPUT_MAX_BYTES];
+    size_t i, keys_len = 0;
+
+    *diff_len = 0;
+    if (st->current == st->acked)
+        return 0;
+
+    for (i = 0; i < st->nrecords; i++) {
+        if (st->records[i].state > st->acked) {
+            if (keys_len + st->records[i].len > sizeof(keys))
+                return -1;
+            memcpy(keys + keys_len, st->bytes + st->records[i].off,
+                   st->records[i].len);
+            keys_len += st->records[i].len;
+        }
+    }
+    if (!keys_len)
+        return -1;
+
+    return cmosh_encode_user_keystroke_message(keys, keys_len, diffbuf,
+                                               diffbuf_len, diff_len);
 }
 
 static int append_raw(char *buf, size_t buflen, size_t *pos, const char *s)
@@ -349,14 +499,15 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
     cmosh_socket_t s;
     unsigned char packet[CMOSH_MAX_PACKET], plain[CMOSH_MAX_PACKET];
     unsigned char instruction[256], compressed[320], fragment[384], diff[64];
-    unsigned char decompressed[512];
-    unsigned char host_output[1024];
+    unsigned char decompressed[8192];
+    unsigned char host_output[8192];
     size_t packet_len = 0, plain_len = 0;
     size_t instruction_len = 0, compressed_len = 0, fragment_len = 0;
     size_t diff_len = 0;
     uint64_t seq = 0;
     struct cmosh_transport_instruction ti;
     struct cmosh_fragment frag;
+    unsigned int cols = 80, rows = 24;
     int rc = -1;
     fd_set rfds;
     struct timeval tv;
@@ -373,7 +524,8 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
     memset(&ti, 0, sizeof(ti));
     ti.protocol_version = CMOSH_PROTOCOL_VERSION;
     ti.new_num = 1;
-    if (cmosh_encode_user_resize_message(80, 24, diff, sizeof(diff),
+    cmosh_console_size(&cols, &rows);
+    if (cmosh_encode_user_resize_message(cols, rows, diff, sizeof(diff),
                                          &diff_len) != 0)
         goto out_socket;
     ti.diff = diff;
@@ -575,24 +727,30 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                     if (verbose && ti.diff_len)
                         cmosh_dump_hex(stderr, "post-ACK diff", ti.diff,
                                        ti.diff_len);
-                    if (ti.diff_len &&
-                        cmosh_decode_host_output(ti.diff, ti.diff_len,
-                                                 host_output,
-                                                 sizeof(host_output),
-                                                 &plain_len) == 0 &&
-                        plain_len) {
-                        fwrite(host_output, 1, plain_len, stdout);
-                        fflush(stdout);
+                    if (ti.diff_len) {
+                        if (cmosh_decode_host_output(ti.diff, ti.diff_len,
+                                                     host_output,
+                                                     sizeof(host_output),
+                                                     &plain_len) == 0 &&
+                            plain_len) {
+                            fwrite(host_output, 1, plain_len, stdout);
+                            fflush(stdout);
+                        } else if (verbose) {
+                            cmosh_dump_hex(stderr, "undecoded host diff",
+                                           ti.diff, ti.diff_len);
+                        }
                     }
                     {
-                        uint64_t client_state = 1, server_state = ti.new_num;
+                        struct cmosh_input_state input;
+                        uint64_t server_state = ti.new_num;
                         uint64_t send_seq = 3;
                         unsigned int echo_ts =
                             ((unsigned)plain[0] << 8) | plain[1];
                         int idle = 0;
 
+                        cmosh_input_init(&input, ti.ack_num);
                         for (;;) {
-                            unsigned char keys[256], diffbuf[512];
+                            unsigned char keys[256], diffbuf[1024];
                             size_t key_len = 0, loop_diff_len = 0;
                             int sent = 0;
 
@@ -603,15 +761,15 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                 goto out_socket;
                             }
                             if (key_len) {
-                                client_state++;
-                                if (cmosh_encode_user_keystroke_message(
-                                        keys, key_len, diffbuf,
-                                        sizeof(diffbuf), &loop_diff_len) !=
-                                    0)
+                                if (cmosh_input_append(&input, keys,
+                                                       key_len) != 0 ||
+                                    cmosh_input_pending_diff(
+                                        &input, diffbuf, sizeof(diffbuf),
+                                        &loop_diff_len) != 0)
                                     goto out_socket;
                                 if (cmosh_make_packet(
-                                        key, send_seq++, client_state - 1,
-                                        client_state, server_state, diffbuf,
+                                        key, send_seq++, input.acked,
+                                        input.current, server_state, diffbuf,
                                         loop_diff_len, echo_ts, packet,
                                         sizeof(packet), &packet_len) != 0)
                                     goto out_socket;
@@ -619,20 +777,26 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                          (int)packet_len, 0) == SOCKET_ERROR)
                                     goto out_socket;
                                 sent = 1;
-                                if (verbose)
+                                if (verbose) {
                                     fprintf(stderr,
                                             "cmosh: sent %u input byte(s), "
-                                            "client state=%llu\n",
+                                            "client state=%llu acked=%llu\n",
                                             (unsigned)key_len,
-                                            (unsigned long long)client_state);
+                                            (unsigned long long)input.current,
+                                            (unsigned long long)input.acked);
+                                    cmosh_dump_hex(stderr, "input bytes", keys,
+                                                   key_len);
+                                }
                             }
 
-                            FD_ZERO(&rfds);
-                            FD_SET(s, &rfds);
-                            tv.tv_sec = 0;
-                            tv.tv_usec = 100000;
-                            if (select((int)(s + 1), &rfds, NULL, NULL,
-                                       &tv) > 0) {
+                            for (;;) {
+                                FD_ZERO(&rfds);
+                                FD_SET(s, &rfds);
+                                tv.tv_sec = 0;
+                                tv.tv_usec = sent ? 0 : 100000;
+                                if (select((int)(s + 1), &rfds, NULL, NULL,
+                                           &tv) <= 0)
+                                    break;
                                 idle = 0;
                                 packet_len = (size_t)recv(
                                     s, (char *)packet, sizeof(packet), 0);
@@ -640,16 +804,34 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                     cmosh_decode_packet(key, packet,
                                                         packet_len, &ti,
                                                         &echo_ts, &seq) == 0) {
+                                    cmosh_input_note_ack(&input, ti.ack_num);
                                     if (ti.new_num > server_state &&
-                                        ti.diff_len &&
-                                        cmosh_decode_host_output(
-                                            ti.diff, ti.diff_len, host_output,
-                                            sizeof(host_output), &plain_len) ==
-                                            0 &&
-                                        plain_len) {
-                                        fwrite(host_output, 1, plain_len,
-                                               stdout);
-                                        fflush(stdout);
+                                        ti.diff_len) {
+                                        if (verbose)
+                                            cmosh_dump_hex(stderr,
+                                                           "loop host diff",
+                                                           ti.diff,
+                                                           ti.diff_len);
+                                        if (cmosh_decode_host_output(
+                                                ti.diff, ti.diff_len,
+                                                host_output,
+                                                sizeof(host_output),
+                                                &plain_len) == 0 &&
+                                            plain_len) {
+                                            if (verbose)
+                                                cmosh_dump_hex(
+                                                    stderr,
+                                                    "decoded host bytes",
+                                                    host_output, plain_len);
+                                            fwrite(host_output, 1, plain_len,
+                                                   stdout);
+                                            fflush(stdout);
+                                        } else if (verbose) {
+                                            cmosh_dump_hex(
+                                                stderr,
+                                                "undecoded loop host diff",
+                                                ti.diff, ti.diff_len);
+                                        }
                                     }
                                     if (ti.new_num > server_state)
                                         server_state = ti.new_num;
@@ -664,10 +846,23 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                 (unsigned long long)ti.ack_num,
                                                 (unsigned)ti.diff_len);
                                     if (ti.new_num == server_state) {
+                                        const unsigned char *pending = NULL;
+                                        size_t pending_len = 0;
+
+                                        if (input.current > input.acked) {
+                                            if (cmosh_input_pending_diff(
+                                                    &input, diffbuf,
+                                                    sizeof(diffbuf),
+                                                    &loop_diff_len) != 0)
+                                                goto out_socket;
+                                            pending = diffbuf;
+                                            pending_len = loop_diff_len;
+                                        }
                                         if (cmosh_make_packet(
-                                                key, send_seq++, client_state,
-                                                client_state, server_state,
-                                                NULL, 0, echo_ts, packet,
+                                                key, send_seq++,
+                                                input.acked, input.current,
+                                                server_state, pending,
+                                                pending_len, echo_ts, packet,
                                                 sizeof(packet), &packet_len) !=
                                             0)
                                             goto out_socket;
@@ -677,12 +872,24 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                             goto out_socket;
                                     }
                                 }
-                            } else if (!sent && ++idle % 20 == 0) {
+                            }
+                            if (!sent && ++idle % 20 == 0) {
+                                const unsigned char *pending = NULL;
+                                size_t pending_len = 0;
+
+                                if (input.current > input.acked) {
+                                    if (cmosh_input_pending_diff(
+                                            &input, diffbuf, sizeof(diffbuf),
+                                            &loop_diff_len) != 0)
+                                        goto out_socket;
+                                    pending = diffbuf;
+                                    pending_len = loop_diff_len;
+                                }
                                 if (cmosh_make_packet(
-                                        key, send_seq++, client_state,
-                                        client_state, server_state, NULL, 0,
-                                        echo_ts, packet, sizeof(packet),
-                                        &packet_len) != 0)
+                                        key, send_seq++, input.acked,
+                                        input.current, server_state, pending,
+                                        pending_len, echo_ts, packet,
+                                        sizeof(packet), &packet_len) != 0)
                                     goto out_socket;
                                 if (send(s, (const char *)packet,
                                          (int)packet_len, 0) == SOCKET_ERROR)
@@ -709,6 +916,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
     rc = 0;
 
 out_socket:
+    cmosh_console_restore();
     cmosh_close_socket(s);
 out_wsa:
 #ifdef _WIN32
