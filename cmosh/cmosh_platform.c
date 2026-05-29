@@ -74,8 +74,8 @@ void cmosh_console_setup(void)
     if (in != INVALID_HANDLE_VALUE && GetConsoleMode(in, &mode)) {
         saved_input_mode = mode;
         have_saved_input_mode = 1;
-        mode &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
-        mode |= ENABLE_PROCESSED_INPUT;
+        mode &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT |
+                  ENABLE_PROCESSED_INPUT);
         SetConsoleMode(in, mode);
     }
 #else
@@ -845,6 +845,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                     {
                         struct cmosh_input_state input;
                         uint64_t server_state = ti.new_num;
+                        uint64_t last_server_seq = seq;
                         uint64_t send_seq = 3;
                         unsigned int echo_ts =
                             ((unsigned)plain[0] << 8) | plain[1];
@@ -943,6 +944,15 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                     cmosh_decode_packet(key, packet,
                                                         packet_len, &ti,
                                                         &echo_ts, &seq) == 0) {
+                                    if (seq <= last_server_seq) {
+                                        if (verbose)
+                                            fprintf(stderr,
+                                                    "cmosh: ignored duplicate "
+                                                    "server packet seq=%llu\n",
+                                                    (unsigned long long)seq);
+                                        continue;
+                                    }
+                                    last_server_seq = seq;
                                     cmosh_input_note_ack(&input, ti.ack_num);
                                     if (ti.new_num > server_state &&
                                         ti.diff_len) {
