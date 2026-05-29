@@ -212,6 +212,16 @@ static void test_proto(void)
               14, buf, sizeof(buf), &n) == 0 &&
               n == 2 && memcmp(buf, "ab", 2) == 0,
           "decode multiple host output instructions");
+    check(cmosh_decode_host_output(
+              (const unsigned char *)"\x12\x05\x12\x03\x22\x01X", 7,
+              buf, sizeof(buf), &n) == 0 &&
+              n == 0,
+          "ignore unknown top-level host bytes");
+    check(cmosh_decode_host_output(
+              (const unsigned char *)"\x0a\x05\x1a\x03\x22\x01Y", 7,
+              buf, sizeof(buf), &n) == 0 &&
+              n == 0,
+          "ignore unknown host instruction bytes");
     check(cmosh_encode_user_keystroke_message((const unsigned char *)"x", 1,
                                               buf, sizeof(buf), &n) == 0 &&
               n == 7 && memcmp(buf, "\x0a\x05\x12\x03\x22\x01", 6) == 0 &&

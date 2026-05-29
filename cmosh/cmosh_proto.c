@@ -292,10 +292,6 @@ static int decode_host_bytes(const unsigned char *buf, size_t buflen,
     return 0;
 }
 
-static int skip_or_recurse_bytes(const unsigned char *buf, size_t len,
-                                 unsigned char *out, size_t outlen,
-                                 size_t *written, int depth);
-
 static int decode_host_instruction(const unsigned char *buf, size_t buflen,
                                    unsigned char *out, size_t outlen,
                                    size_t *written)
@@ -318,10 +314,6 @@ static int decode_host_instruction(const unsigned char *buf, size_t buflen,
                 decode_host_bytes(buf + pos, (size_t)len, out, outlen,
                                   written) != 0)
                 return -1;
-            if (field != 2 &&
-                skip_or_recurse_bytes(buf + pos, (size_t)len, out, outlen,
-                                      written, 1) != 0)
-                return -1;
             pos += (size_t)len;
         } else if (wire_type == 0) {
             uint64_t ignored;
@@ -331,23 +323,6 @@ static int decode_host_instruction(const unsigned char *buf, size_t buflen,
             return -1;
         }
     }
-    return 0;
-}
-
-static int skip_or_recurse_bytes(const unsigned char *buf, size_t len,
-                                 unsigned char *out, size_t outlen,
-                                 size_t *written, int depth)
-{
-    size_t before = *written;
-
-    if (depth > 4 || len == 0)
-        return 0;
-    if (decode_host_instruction(buf, len, out, outlen, written) == 0)
-        return 0;
-    *written = before;
-    if (decode_host_bytes(buf, len, out, outlen, written) == 0)
-        return 0;
-    *written = before;
     return 0;
 }
 
@@ -376,10 +351,6 @@ int cmosh_decode_host_output(const unsigned char *buf, size_t buflen,
             if (field == 1 &&
                 decode_host_instruction(buf + pos, (size_t)len, out, outlen,
                                         written) != 0)
-                return -1;
-            if (field != 1 &&
-                skip_or_recurse_bytes(buf + pos, (size_t)len, out, outlen,
-                                      written, 1) != 0)
                 return -1;
             pos += (size_t)len;
         } else if (wire_type == 0) {

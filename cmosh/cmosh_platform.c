@@ -131,6 +131,18 @@ static void cmosh_terminal_soft_reset(void)
     fflush(stdout);
 }
 
+static void cmosh_terminal_session_start(void)
+{
+    static const char init[] =
+        "\033[0m"
+        "\033[?25h"
+        "\033[2J"
+        "\033[H";
+
+    fwrite(init, 1, sizeof(init) - 1, stdout);
+    fflush(stdout);
+}
+
 static void cmosh_dump_hex(FILE *fp, const char *label,
                            const unsigned char *data, size_t len);
 
@@ -209,9 +221,9 @@ static int cmosh_console_read(unsigned char *buf, size_t buflen, size_t *len)
                 int code;
                 const char *seq;
             } keys[] = {
-                { 0x47, "\033[H" },  { 0x48, "\033[A" },
+                { 0x47, "\033[1~" }, { 0x48, "\033[A" },
                 { 0x49, "\033[5~" }, { 0x4b, "\033[D" },
-                { 0x4d, "\033[C" },  { 0x4f, "\033[F" },
+                { 0x4d, "\033[C" },  { 0x4f, "\033[4~" },
                 { 0x50, "\033[B" },  { 0x51, "\033[6~" },
                 { 0x52, "\033[2~" }, { 0x53, "\033[3~" },
                 { 0x3b, "\033OP" },  { 0x3c, "\033OQ" },
@@ -986,6 +998,8 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                     if (verbose && ti.diff_len)
                         cmosh_dump_hex(stderr, "post-ACK diff", ti.diff,
                                        ti.diff_len);
+                    if (!verbose)
+                        cmosh_terminal_session_start();
                     if (cmosh_decode_and_render_host(
                             ti.diff, ti.diff_len, host_output,
                             sizeof(host_output), verbose) != 0)
