@@ -394,7 +394,8 @@ static int cmosh_server_queue_add(struct cmosh_server_queue *queue,
                                   uint64_t old_num, uint64_t new_num,
                                   const unsigned char *diff, size_t diff_len)
 {
-    size_t i, slot = CMOSH_SERVER_QUEUE;
+    size_t i, slot = CMOSH_SERVER_QUEUE, oldest = CMOSH_SERVER_QUEUE;
+    uint64_t oldest_new = UINT64_MAX;
 
     if (diff_len > CMOSH_SERVER_DIFF_MAX)
         return -1;
@@ -405,7 +406,13 @@ static int cmosh_server_queue_add(struct cmosh_server_queue *queue,
             return 0;
         if (!queue->entries[i].used && slot == CMOSH_SERVER_QUEUE)
             slot = i;
+        if (queue->entries[i].used && queue->entries[i].new_num < oldest_new) {
+            oldest_new = queue->entries[i].new_num;
+            oldest = i;
+        }
     }
+    if (slot == CMOSH_SERVER_QUEUE)
+        slot = oldest;
     if (slot == CMOSH_SERVER_QUEUE)
         return -1;
 
@@ -1061,6 +1068,8 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                     cmosh_decode_packet(key, packet,
                                                         packet_len, &ti,
                                                         &echo_ts, &seq) == 0) {
+                                    uint64_t previous_server_state;
+
                                     if (cmosh_recv_history_note(
                                             &recv_history, seq) != 0) {
                                         if (verbose)
@@ -1070,6 +1079,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                     (unsigned long long)seq);
                                         continue;
                                     }
+                                    previous_server_state = server_state;
                                     cmosh_input_note_ack(&input, ti.ack_num);
                                     if (ti.new_num > server_state) {
                                         if (ti.diff_len) {
@@ -1116,7 +1126,8 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                         rc = 0;
                                         goto out_socket;
                                     }
-                                    if (ti.new_num == server_state) {
+                                    if (server_state > previous_server_state ||
+                                        ti.new_num == server_state) {
                                         if (cmosh_make_packet(
                                                 key, send_seq++,
                                                 input.acked, input.acked,
