@@ -30,12 +30,16 @@ static int have_saved_input_mode;
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/time.h>
+#include <sys/select.h>
 #include <sys/ioctl.h>
+#include <termios.h>
 #include <unistd.h>
 #define INVALID_SOCKET (-1)
 #define SOCKET_ERROR (-1)
 #define cmosh_close_socket close
 typedef int cmosh_socket_t;
+static struct termios saved_termios;
+static int have_saved_termios;
 #endif
 
 static int cmosh_socket_valid(cmosh_socket_t s)
@@ -64,6 +68,19 @@ void cmosh_console_setup(void)
         mode |= ENABLE_PROCESSED_INPUT;
         SetConsoleMode(in, mode);
     }
+#else
+    if (isatty(0) && tcgetattr(0, &saved_termios) == 0) {
+        struct termios raw = saved_termios;
+
+        have_saved_termios = 1;
+        raw.c_iflag &= (tcflag_t)~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+        raw.c_oflag &= (tcflag_t)~OPOST;
+        raw.c_cflag |= CS8;
+        raw.c_lflag &= (tcflag_t)~(ECHO | ICANON | IEXTEN | ISIG);
+        raw.c_cc[VMIN] = 0;
+        raw.c_cc[VTIME] = 0;
+        tcsetattr(0, TCSAFLUSH, &raw);
+    }
 #endif
 }
 
@@ -74,6 +91,9 @@ static void cmosh_console_restore(void)
 
     if (have_saved_input_mode && in != INVALID_HANDLE_VALUE)
         SetConsoleMode(in, saved_input_mode);
+#else
+    if (have_saved_termios)
+        tcsetattr(0, TCSAFLUSH, &saved_termios);
 #endif
 }
 
@@ -115,6 +135,17 @@ static unsigned int cmosh_now16_ms(void)
     gettimeofday(&tv, NULL);
     return (unsigned int)(((tv.tv_sec * 1000U) + (tv.tv_usec / 1000U)) &
                           0xffffU);
+#endif
+}
+
+static uint64_t cmosh_now_ms(void)
+{
+#ifdef _WIN32
+    return (uint64_t)GetTickCount();
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return ((uint64_t)tv.tv_sec * 1000U) + (uint64_t)(tv.tv_usec / 1000U);
 #endif
 }
 
@@ -289,6 +320,8 @@ struct cmosh_input_record {
     uint64_t state;
     size_t off;
     size_t len;
+    uint64_t last_sent_ms;
+    unsigned int send_count;
 };
 
 struct cmosh_input_state {
@@ -309,7 +342,8 @@ static void cmosh_input_init(struct cmosh_input_state *st,
 }
 
 static int cmosh_input_append(struct cmosh_input_state *st,
-                              const unsigned char *keys, size_t keys_len)
+                              const unsigned char *keys, size_t keys_len,
+                              uint64_t now_ms)
 {
     struct cmosh_input_record *rec;
 
@@ -324,6 +358,8 @@ static int cmosh_input_append(struct cmosh_input_state *st,
     rec->state = st->current;
     rec->off = st->bytes_len;
     rec->len = keys_len;
+    rec->last_sent_ms = now_ms;
+    rec->send_count = 1;
     memcpy(st->bytes + st->bytes_len, keys, keys_len);
     st->bytes_len += keys_len;
     return 0;
@@ -355,31 +391,34 @@ static void cmosh_input_note_ack(struct cmosh_input_state *st, uint64_t acked)
     st->nrecords -= cut;
 }
 
-static int cmosh_input_pending_diff(struct cmosh_input_state *st,
-                                    unsigned char *diffbuf,
-                                    size_t diffbuf_len, size_t *diff_len)
+static struct cmosh_input_record *cmosh_input_retransmit_record(
+    struct cmosh_input_state *st, uint64_t now_ms)
 {
-    unsigned char keys[CMOSH_INPUT_MAX_BYTES];
-    size_t i, keys_len = 0;
-
-    *diff_len = 0;
-    if (st->current == st->acked)
-        return 0;
+    size_t i;
 
     for (i = 0; i < st->nrecords; i++) {
-        if (st->records[i].state > st->acked) {
-            if (keys_len + st->records[i].len > sizeof(keys))
-                return -1;
-            memcpy(keys + keys_len, st->bytes + st->records[i].off,
-                   st->records[i].len);
-            keys_len += st->records[i].len;
-        }
-    }
-    if (!keys_len)
-        return -1;
+        struct cmosh_input_record *rec = &st->records[i];
+        uint64_t age = now_ms - rec->last_sent_ms;
+        uint64_t retry_ms = rec->send_count < 4 ? 750U : 1500U;
 
-    return cmosh_encode_user_keystroke_message(keys, keys_len, diffbuf,
-                                               diffbuf_len, diff_len);
+        if (rec->state <= st->acked)
+            continue;
+        if (age >= retry_ms)
+            return rec;
+    }
+    return NULL;
+}
+
+static int cmosh_input_record_diff(struct cmosh_input_state *st,
+                                   struct cmosh_input_record *rec,
+                                   unsigned char *diffbuf,
+                                   size_t diffbuf_len, size_t *diff_len)
+{
+    if (!rec || rec->off + rec->len > st->bytes_len)
+        return -1;
+    return cmosh_encode_user_keystroke_message(st->bytes + rec->off, rec->len,
+                                               diffbuf, diffbuf_len,
+                                               diff_len);
 }
 
 static int append_raw(char *buf, size_t buflen, size_t *pos, const char *s)
@@ -780,6 +819,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                             unsigned char keys[256], diffbuf[1024];
                             size_t key_len = 0, loop_diff_len = 0;
                             int sent = 0;
+                            uint64_t now_ms = cmosh_now_ms();
 
                             cmosh_console_read(keys, sizeof(keys), &key_len);
                             if (key_len &&
@@ -791,7 +831,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                 uint64_t old_client_state;
 
                                 if (cmosh_input_append(&input, keys,
-                                                       key_len) != 0 ||
+                                                       key_len, now_ms) != 0 ||
                                     cmosh_encode_user_keystroke_message(
                                         keys, key_len, diffbuf,
                                         sizeof(diffbuf), &loop_diff_len) !=
@@ -879,21 +919,31 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                 }
                             }
                             if (!sent && ++idle % 20 == 0) {
-                                const unsigned char *pending = NULL;
-                                size_t pending_len = 0;
+                                struct cmosh_input_record *retry;
+                                uint64_t old_client_state;
 
-                                if (input.current > input.acked) {
-                                    if (cmosh_input_pending_diff(
-                                            &input, diffbuf, sizeof(diffbuf),
+                                now_ms = cmosh_now_ms();
+                                retry = cmosh_input_retransmit_record(
+                                    &input, now_ms);
+                                if (retry) {
+                                    if (cmosh_input_record_diff(
+                                            &input, retry, diffbuf,
+                                            sizeof(diffbuf),
                                             &loop_diff_len) != 0)
                                         goto out_socket;
-                                    pending = diffbuf;
-                                    pending_len = loop_diff_len;
+                                    old_client_state = retry->state - 1;
+                                    retry->last_sent_ms = now_ms;
+                                    retry->send_count++;
+                                } else {
+                                    old_client_state = input.acked;
+                                    loop_diff_len = 0;
                                 }
                                 if (cmosh_make_packet(
-                                        key, send_seq++, input.acked,
-                                        input.current, server_state, pending,
-                                        pending_len, echo_ts, packet,
+                                        key, send_seq++, old_client_state,
+                                        retry ? retry->state : input.acked,
+                                        server_state,
+                                        retry ? diffbuf : NULL,
+                                        loop_diff_len, echo_ts, packet,
                                         sizeof(packet), &packet_len) != 0)
                                     goto out_socket;
                                 if (send(s, (const char *)packet,
@@ -903,11 +953,15 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                     fprintf(stderr,
                                             "cmosh: sent keepalive ack=%llu "
                                             "client old=%llu new=%llu "
-                                            "pending=%u\n",
+                                            "pending=%u retries=%u\n",
                                             (unsigned long long)server_state,
-                                            (unsigned long long)input.acked,
-                                            (unsigned long long)input.current,
-                                            (unsigned)pending_len);
+                                            (unsigned long long)
+                                                old_client_state,
+                                            (unsigned long long)
+                                                (retry ? retry->state :
+                                                         input.acked),
+                                            (unsigned)loop_diff_len,
+                                            retry ? retry->send_count : 0);
                                 }
                             }
                         }
