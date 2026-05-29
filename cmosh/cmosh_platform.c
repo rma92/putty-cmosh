@@ -13,6 +13,8 @@
 #define CMOSH_INPUT_RETRY_FIRST_MS 5000U
 #define CMOSH_INPUT_RETRY_LATER_MS 10000U
 #define CMOSH_RECV_HISTORY 64
+#define CMOSH_SERVER_QUEUE 16
+#define CMOSH_SERVER_DIFF_MAX 8192
 
 #ifdef _WIN32
 #include <conio.h>
@@ -370,6 +372,82 @@ struct cmosh_recv_history {
     size_t next;
     size_t count;
 };
+
+struct cmosh_server_diff {
+    int used;
+    uint64_t old_num;
+    uint64_t new_num;
+    size_t len;
+    unsigned char diff[CMOSH_SERVER_DIFF_MAX];
+};
+
+struct cmosh_server_queue {
+    struct cmosh_server_diff entries[CMOSH_SERVER_QUEUE];
+};
+
+static void cmosh_server_queue_init(struct cmosh_server_queue *queue)
+{
+    memset(queue, 0, sizeof(*queue));
+}
+
+static int cmosh_server_queue_add(struct cmosh_server_queue *queue,
+                                  uint64_t old_num, uint64_t new_num,
+                                  const unsigned char *diff, size_t diff_len)
+{
+    size_t i, slot = CMOSH_SERVER_QUEUE;
+
+    if (diff_len > CMOSH_SERVER_DIFF_MAX)
+        return -1;
+    for (i = 0; i < CMOSH_SERVER_QUEUE; i++) {
+        if (queue->entries[i].used &&
+            queue->entries[i].old_num == old_num &&
+            queue->entries[i].new_num == new_num)
+            return 0;
+        if (!queue->entries[i].used && slot == CMOSH_SERVER_QUEUE)
+            slot = i;
+    }
+    if (slot == CMOSH_SERVER_QUEUE)
+        return -1;
+
+    queue->entries[slot].used = 1;
+    queue->entries[slot].old_num = old_num;
+    queue->entries[slot].new_num = new_num;
+    queue->entries[slot].len = diff_len;
+    if (diff_len)
+        memcpy(queue->entries[slot].diff, diff, diff_len);
+    return 0;
+}
+
+static int cmosh_server_queue_apply(struct cmosh_server_queue *queue,
+                                    uint64_t *server_state,
+                                    unsigned char *host_output,
+                                    size_t host_output_len, int verbose)
+{
+    int progressed;
+
+    do {
+        size_t i;
+
+        progressed = 0;
+        for (i = 0; i < CMOSH_SERVER_QUEUE; i++) {
+            struct cmosh_server_diff *entry = &queue->entries[i];
+
+            if (!entry->used || entry->new_num <= *server_state)
+                continue;
+            if (entry->old_num > *server_state)
+                continue;
+            if (cmosh_decode_and_render_host(entry->diff, entry->len,
+                                             host_output, host_output_len,
+                                             verbose) != 0)
+                return -1;
+            *server_state = entry->new_num;
+            entry->used = 0;
+            progressed = 1;
+        }
+    } while (progressed);
+
+    return 0;
+}
 
 static void cmosh_recv_history_init(struct cmosh_recv_history *hist,
                                     uint64_t first_seq)
@@ -878,6 +956,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                     {
                         struct cmosh_input_state input;
                         struct cmosh_recv_history recv_history;
+                        struct cmosh_server_queue server_queue;
                         uint64_t server_state = ti.new_num;
                         uint64_t send_seq = 3;
                         unsigned int echo_ts =
@@ -887,6 +966,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
 
                         cmosh_input_init(&input, ti.ack_num);
                         cmosh_recv_history_init(&recv_history, seq);
+                        cmosh_server_queue_init(&server_queue);
                         for (;;) {
                             unsigned char keys[256], diffbuf[1024];
                             size_t key_len = 0, loop_diff_len = 0;
@@ -991,28 +1071,36 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                         continue;
                                     }
                                     cmosh_input_note_ack(&input, ti.ack_num);
-                                    if (verbose &&
-                                        ti.new_num > server_state &&
-                                        ti.old_num > server_state)
-                                        fprintf(stderr,
-                                                "cmosh: received future "
-                                                "server diff old=%llu "
-                                                "new=%llu current=%llu\n",
-                                                (unsigned long long)ti.old_num,
-                                                (unsigned long long)ti.new_num,
-                                                (unsigned long long)
-                                                    server_state);
-                                    if (ti.new_num > server_state &&
-                                        ti.diff_len) {
-                                        if (cmosh_decode_and_render_host(
-                                                ti.diff, ti.diff_len,
+                                    if (ti.new_num > server_state) {
+                                        if (ti.diff_len) {
+                                            if (cmosh_server_queue_add(
+                                                &server_queue, ti.old_num,
+                                                ti.new_num, ti.diff,
+                                                ti.diff_len) != 0)
+                                                goto out_socket;
+                                        } else if (ti.old_num <=
+                                                   server_state) {
+                                            server_state = ti.new_num;
+                                        }
+                                        if (verbose &&
+                                            ti.old_num > server_state)
+                                            fprintf(stderr,
+                                                    "cmosh: queued future "
+                                                    "server diff old=%llu "
+                                                    "new=%llu current=%llu\n",
+                                                    (unsigned long long)
+                                                        ti.old_num,
+                                                    (unsigned long long)
+                                                        ti.new_num,
+                                                    (unsigned long long)
+                                                        server_state);
+                                        if (cmosh_server_queue_apply(
+                                                &server_queue, &server_state,
                                                 host_output,
                                                 sizeof(host_output),
                                                 verbose) != 0)
                                             goto out_socket;
                                     }
-                                    if (ti.new_num > server_state)
-                                        server_state = ti.new_num;
                                     if (verbose)
                                         fprintf(stderr,
                                                 "cmosh: loop recv seq=%llu "
