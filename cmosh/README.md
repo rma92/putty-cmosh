@@ -31,14 +31,20 @@ Current implemented pieces:
 - Decode basic HostMessage hoststring diffs and write the resulting bytes to
   stdout.
 - Bounded bootstrap has been replaced by a simple session loop that receives
-  host output, sends keystrokes, sends periodic ACK keepalives, and exits on
-  Ctrl+]. The initial resize uses the current console size; live resize updates
-  are deferred until the client state model is more complete.
+  host output, sends keystrokes, sends ACK keepalives, retransmits timed-out
+  input states, and exits locally on Ctrl+]. Ctrl+C is forwarded to the remote
+  session. The initial resize uses the current console size, and live resize
+  updates are sent during the session.
+- Basic Windows console special keys are translated into terminal escape
+  sequences for arrows, Home/End, Insert/Delete, Page Up/Down, and F1-F12.
+- Server UDP packets are de-duplicated by nonce, and out-of-order future server
+  diffs are queued briefly until their base state is rendered.
 - Normal mode is intended to show only terminal I/O. `--verbose` enables the
   bootstrap and protocol trace.
 - Windows console output enables virtual-terminal processing before entering
   the UDP session.
 
-The full mosh state-sync/UDP session loop is not implemented yet. The
-executable intentionally exits after successful bootstrap and UDP setup with a
-clear diagnostic instead of pretending to speak an incomplete protocol.
+The full mosh terminal state model and local prediction engine are not
+implemented yet. The current client speaks enough of the encrypted UDP protocol
+for practical shell use, but complex terminal applications and severe packet
+loss still need a real screen-state implementation.

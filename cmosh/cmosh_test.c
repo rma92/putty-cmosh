@@ -200,6 +200,18 @@ static void test_proto(void)
               buf, sizeof(buf), &n) == 0 &&
               n == 1 && buf[0] == '\n',
           "decode host output");
+    check(cmosh_decode_host_output(
+              (const unsigned char *)"\x0a\x04\x3a\x02\x40\x7b", 6,
+              buf, sizeof(buf), &n) == 0 &&
+              n == 0,
+          "decode echo ack without output");
+    check(cmosh_decode_host_output(
+              (const unsigned char *)
+                  "\x0a\x05\x12\x03\x22\x01" "a"
+                  "\x0a\x05\x12\x03\x22\x01" "b",
+              14, buf, sizeof(buf), &n) == 0 &&
+              n == 2 && memcmp(buf, "ab", 2) == 0,
+          "decode multiple host output instructions");
     check(cmosh_encode_user_keystroke_message((const unsigned char *)"x", 1,
                                               buf, sizeof(buf), &n) == 0 &&
               n == 7 && memcmp(buf, "\x0a\x05\x12\x03\x22\x01", 6) == 0 &&

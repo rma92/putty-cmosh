@@ -204,8 +204,38 @@ static int cmosh_console_read(unsigned char *buf, size_t buflen, size_t *len)
         return 0;
     while (*len < buflen && _kbhit()) {
         int c = _getch();
-        if (c == 0 || c == 0xe0)
+        if (c == 0 || c == 0xe0) {
+            static const struct {
+                int code;
+                const char *seq;
+            } keys[] = {
+                { 0x47, "\033[H" },  { 0x48, "\033[A" },
+                { 0x49, "\033[5~" }, { 0x4b, "\033[D" },
+                { 0x4d, "\033[C" },  { 0x4f, "\033[F" },
+                { 0x50, "\033[B" },  { 0x51, "\033[6~" },
+                { 0x52, "\033[2~" }, { 0x53, "\033[3~" },
+                { 0x3b, "\033OP" },  { 0x3c, "\033OQ" },
+                { 0x3d, "\033OR" },  { 0x3e, "\033OS" },
+                { 0x3f, "\033[15~" }, { 0x40, "\033[17~" },
+                { 0x41, "\033[18~" }, { 0x42, "\033[19~" },
+                { 0x43, "\033[20~" }, { 0x44, "\033[21~" },
+                { 0x85, "\033[23~" }, { 0x86, "\033[24~" },
+            };
+            int ext = _getch();
+            size_t i;
+
+            for (i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+                if (keys[i].code == ext) {
+                    size_t n = strlen(keys[i].seq);
+                    if (*len + n <= buflen) {
+                        memcpy(buf + *len, keys[i].seq, n);
+                        *len += n;
+                    }
+                    break;
+                }
+            }
             continue;
+        }
         if (c == '\b')
             c = 0x7f;
         buf[(*len)++] = (unsigned char)c;
@@ -1082,7 +1112,8 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                     previous_server_state = server_state;
                                     cmosh_input_note_ack(&input, ti.ack_num);
                                     if (ti.new_num > server_state) {
-                                        if (ti.diff_len) {
+                                        if (ti.diff_len ||
+                                            ti.old_num > server_state) {
                                             if (cmosh_server_queue_add(
                                                 &server_queue, ti.old_num,
                                                 ti.new_num, ti.diff,
