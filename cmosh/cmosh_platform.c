@@ -9,8 +9,12 @@
 #include <string.h>
 #include <time.h>
 
+#define CMOSH_SERVER_SHUTDOWN_STATE UINT64_MAX
+
 #ifdef _WIN32
 #include <conio.h>
+#include <fcntl.h>
+#include <io.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -46,6 +50,9 @@ void cmosh_console_setup(void)
     HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
     DWORD mode;
 
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
+
     if (out != INVALID_HANDLE_VALUE && GetConsoleMode(out, &mode)) {
         mode |= ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
         SetConsoleMode(out, mode);
@@ -68,6 +75,35 @@ static void cmosh_console_restore(void)
     if (have_saved_input_mode && in != INVALID_HANDLE_VALUE)
         SetConsoleMode(in, saved_input_mode);
 #endif
+}
+
+static void cmosh_dump_hex(FILE *fp, const char *label,
+                           const unsigned char *data, size_t len);
+
+static int cmosh_decode_and_render_host(const unsigned char *diff,
+                                        size_t diff_len,
+                                        unsigned char *host_output,
+                                        size_t host_output_len, int verbose)
+{
+    size_t out_len = 0;
+
+    if (!diff_len)
+        return 0;
+    if (verbose)
+        cmosh_dump_hex(stderr, "loop host diff", diff, diff_len);
+    if (cmosh_decode_host_output(diff, diff_len, host_output, host_output_len,
+                                 &out_len) != 0)
+        return -1;
+    if (out_len) {
+        if (verbose)
+            cmosh_dump_hex(stderr, "decoded host bytes", host_output,
+                           out_len);
+        fwrite(host_output, 1, out_len, stdout);
+        fflush(stdout);
+    } else if (verbose) {
+        cmosh_dump_hex(stderr, "undecoded loop host diff", diff, diff_len);
+    }
+    return 0;
 }
 
 static unsigned int cmosh_now16_ms(void)
@@ -727,19 +763,10 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                     if (verbose && ti.diff_len)
                         cmosh_dump_hex(stderr, "post-ACK diff", ti.diff,
                                        ti.diff_len);
-                    if (ti.diff_len) {
-                        if (cmosh_decode_host_output(ti.diff, ti.diff_len,
-                                                     host_output,
-                                                     sizeof(host_output),
-                                                     &plain_len) == 0 &&
-                            plain_len) {
-                            fwrite(host_output, 1, plain_len, stdout);
-                            fflush(stdout);
-                        } else if (verbose) {
-                            cmosh_dump_hex(stderr, "undecoded host diff",
-                                           ti.diff, ti.diff_len);
-                        }
-                    }
+                    if (cmosh_decode_and_render_host(
+                            ti.diff, ti.diff_len, host_output,
+                            sizeof(host_output), verbose) != 0)
+                        goto out_socket;
                     {
                         struct cmosh_input_state input;
                         uint64_t server_state = ti.new_num;
@@ -807,31 +834,12 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                     cmosh_input_note_ack(&input, ti.ack_num);
                                     if (ti.new_num > server_state &&
                                         ti.diff_len) {
-                                        if (verbose)
-                                            cmosh_dump_hex(stderr,
-                                                           "loop host diff",
-                                                           ti.diff,
-                                                           ti.diff_len);
-                                        if (cmosh_decode_host_output(
+                                        if (cmosh_decode_and_render_host(
                                                 ti.diff, ti.diff_len,
                                                 host_output,
                                                 sizeof(host_output),
-                                                &plain_len) == 0 &&
-                                            plain_len) {
-                                            if (verbose)
-                                                cmosh_dump_hex(
-                                                    stderr,
-                                                    "decoded host bytes",
-                                                    host_output, plain_len);
-                                            fwrite(host_output, 1, plain_len,
-                                                   stdout);
-                                            fflush(stdout);
-                                        } else if (verbose) {
-                                            cmosh_dump_hex(
-                                                stderr,
-                                                "undecoded loop host diff",
-                                                ti.diff, ti.diff_len);
-                                        }
+                                                verbose) != 0)
+                                            goto out_socket;
                                     }
                                     if (ti.new_num > server_state)
                                         server_state = ti.new_num;
@@ -845,6 +853,11 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                 (unsigned long long)ti.new_num,
                                                 (unsigned long long)ti.ack_num,
                                                 (unsigned)ti.diff_len);
+                                    if (ti.new_num ==
+                                        CMOSH_SERVER_SHUTDOWN_STATE) {
+                                        rc = 0;
+                                        goto out_socket;
+                                    }
                                     if (ti.new_num == server_state) {
                                         const unsigned char *pending = NULL;
                                         size_t pending_len = 0;
