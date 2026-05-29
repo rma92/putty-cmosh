@@ -12,6 +12,7 @@
 #define CMOSH_SERVER_SHUTDOWN_STATE UINT64_MAX
 #define CMOSH_INPUT_RETRY_FIRST_MS 5000U
 #define CMOSH_INPUT_RETRY_LATER_MS 10000U
+#define CMOSH_RECV_HISTORY 64
 
 #ifdef _WIN32
 #include <conio.h>
@@ -363,6 +364,38 @@ struct cmosh_input_state {
     struct cmosh_input_record records[CMOSH_INPUT_MAX_RECORDS];
     size_t nrecords;
 };
+
+struct cmosh_recv_history {
+    uint64_t seqs[CMOSH_RECV_HISTORY];
+    size_t next;
+    size_t count;
+};
+
+static void cmosh_recv_history_init(struct cmosh_recv_history *hist,
+                                    uint64_t first_seq)
+{
+    memset(hist, 0, sizeof(*hist));
+    hist->seqs[0] = first_seq;
+    hist->next = 1;
+    hist->count = 1;
+}
+
+static int cmosh_recv_history_note(struct cmosh_recv_history *hist,
+                                   uint64_t seq)
+{
+    size_t i;
+
+    for (i = 0; i < hist->count; i++) {
+        if (hist->seqs[i] == seq)
+            return -1;
+    }
+
+    hist->seqs[hist->next] = seq;
+    hist->next = (hist->next + 1) % CMOSH_RECV_HISTORY;
+    if (hist->count < CMOSH_RECV_HISTORY)
+        hist->count++;
+    return 0;
+}
 
 static void cmosh_input_init(struct cmosh_input_state *st,
                              uint64_t initial_state)
@@ -844,8 +877,8 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                         goto out_socket;
                     {
                         struct cmosh_input_state input;
+                        struct cmosh_recv_history recv_history;
                         uint64_t server_state = ti.new_num;
-                        uint64_t last_server_seq = seq;
                         uint64_t send_seq = 3;
                         unsigned int echo_ts =
                             ((unsigned)plain[0] << 8) | plain[1];
@@ -853,6 +886,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                         int idle = 0;
 
                         cmosh_input_init(&input, ti.ack_num);
+                        cmosh_recv_history_init(&recv_history, seq);
                         for (;;) {
                             unsigned char keys[256], diffbuf[1024];
                             size_t key_len = 0, loop_diff_len = 0;
@@ -893,6 +927,9 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                             cmosh_console_read(keys, sizeof(keys), &key_len);
                             if (key_len &&
                                 cmosh_contains_exit_key(keys, key_len)) {
+                                if (verbose)
+                                    fputs("cmosh: local disconnect key\n",
+                                          stderr);
                                 rc = 0;
                                 goto out_socket;
                             }
@@ -944,7 +981,8 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                     cmosh_decode_packet(key, packet,
                                                         packet_len, &ti,
                                                         &echo_ts, &seq) == 0) {
-                                    if (seq <= last_server_seq) {
+                                    if (cmosh_recv_history_note(
+                                            &recv_history, seq) != 0) {
                                         if (verbose)
                                             fprintf(stderr,
                                                     "cmosh: ignored duplicate "
@@ -952,8 +990,18 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                     (unsigned long long)seq);
                                         continue;
                                     }
-                                    last_server_seq = seq;
                                     cmosh_input_note_ack(&input, ti.ack_num);
+                                    if (verbose &&
+                                        ti.new_num > server_state &&
+                                        ti.old_num > server_state)
+                                        fprintf(stderr,
+                                                "cmosh: received future "
+                                                "server diff old=%llu "
+                                                "new=%llu current=%llu\n",
+                                                (unsigned long long)ti.old_num,
+                                                (unsigned long long)ti.new_num,
+                                                (unsigned long long)
+                                                    server_state);
                                     if (ti.new_num > server_state &&
                                         ti.diff_len) {
                                         if (cmosh_decode_and_render_host(
