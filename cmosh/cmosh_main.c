@@ -97,8 +97,6 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    cmosh_console_setup();
-
     if (cmosh_build_remote_command(opt.server, opt.port_range, opt.locale,
                                    opt.ipv4, opt.ipv6, opt.no_init,
                                    remote_command, sizeof(remote_command)) !=

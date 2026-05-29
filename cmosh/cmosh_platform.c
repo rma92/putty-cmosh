@@ -10,6 +10,8 @@
 #include <time.h>
 
 #define CMOSH_SERVER_SHUTDOWN_STATE UINT64_MAX
+#define CMOSH_INPUT_RETRY_FIRST_MS 5000U
+#define CMOSH_INPUT_RETRY_LATER_MS 10000U
 
 #ifdef _WIN32
 #include <conio.h>
@@ -95,6 +97,24 @@ static void cmosh_console_restore(void)
     if (have_saved_termios)
         tcsetattr(0, TCSAFLUSH, &saved_termios);
 #endif
+}
+
+static void cmosh_terminal_soft_reset(void)
+{
+    static const char reset[] =
+        "\033[?25h"     /* show cursor */
+        "\033[?1000l"   /* mouse reporting off */
+        "\033[?1002l"
+        "\033[?1003l"
+        "\033[?1006l"
+        "\033[?2004l"   /* bracketed paste off */
+        "\033[?1049l"   /* leave alternate screen */
+        "\033[?1047l"
+        "\033[?47l"
+        "\033[0m";      /* reset attributes */
+
+    fwrite(reset, 1, sizeof(reset) - 1, stdout);
+    fflush(stdout);
 }
 
 static void cmosh_dump_hex(FILE *fp, const char *label,
@@ -399,7 +419,8 @@ static struct cmosh_input_record *cmosh_input_retransmit_record(
     for (i = 0; i < st->nrecords; i++) {
         struct cmosh_input_record *rec = &st->records[i];
         uint64_t age = now_ms - rec->last_sent_ms;
-        uint64_t retry_ms = rec->send_count < 4 ? 750U : 1500U;
+        uint64_t retry_ms = rec->send_count < 2 ?
+            CMOSH_INPUT_RETRY_FIRST_MS : CMOSH_INPUT_RETRY_LATER_MS;
 
         if (rec->state <= st->acked)
             continue;
@@ -584,6 +605,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
     struct cmosh_fragment frag;
     unsigned int cols = 80, rows = 24;
     int rc = -1;
+    int console_started = 0;
     fd_set rfds;
     struct timeval tv;
 
@@ -595,6 +617,9 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
 
     if (cmosh_udp_open_connected(host, port, ipv4, ipv6, 0, &s) != 0)
         goto out_wsa;
+
+    cmosh_console_setup();
+    console_started = 1;
 
     memset(&ti, 0, sizeof(ti));
     ti.protocol_version = CMOSH_PROTOCOL_VERSION;
@@ -981,7 +1006,10 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
     rc = 0;
 
 out_socket:
-    cmosh_console_restore();
+    if (console_started) {
+        cmosh_terminal_soft_reset();
+        cmosh_console_restore();
+    }
     cmosh_close_socket(s);
 out_wsa:
 #ifdef _WIN32
