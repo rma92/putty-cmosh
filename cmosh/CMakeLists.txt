@@ -2,9 +2,11 @@ add_library(cmosh_core STATIC
   cmosh_aes.c
   cmosh_base64.c
   cmosh_bootstrap.c
+  cmosh_client.c
   cmosh_fragment.c
   cmosh_ocb.c
   cmosh_proto.c
+  cmosh_session.c
   cmosh_stubs.c
   cmosh_transport.c)
 

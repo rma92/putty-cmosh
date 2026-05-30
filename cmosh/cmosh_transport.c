@@ -1,6 +1,8 @@
 #include "cmosh_transport.h"
 
+#include "cmosh_fragment.h"
 #include "cmosh_ocb.h"
+#include "cmosh_proto.h"
 
 #include <string.h>
 
@@ -12,18 +14,119 @@ void cmosh_transport_init(struct cmosh_transport_state *st)
 
 int cmosh_transport_note_recv(struct cmosh_transport_state *st, uint64_t seq)
 {
+    size_t i;
+
     if (!st)
         return -1;
-    if (seq <= st->recv_seq)
-        return -1;
-    st->recv_seq = seq;
-    st->latest_ack = seq;
+    for (i = 0; i < st->recv_history_count; i++) {
+        if (st->recv_history[i] == seq)
+            return -1;
+    }
+
+    st->recv_history[st->recv_history_next] = seq;
+    st->recv_history_next =
+        (st->recv_history_next + 1) % CMOSH_TRANSPORT_REPLAY_HISTORY;
+    if (st->recv_history_count < CMOSH_TRANSPORT_REPLAY_HISTORY)
+        st->recv_history_count++;
+
+    if (seq > st->recv_seq) {
+        st->recv_seq = seq;
+        st->latest_ack = seq;
+    }
     return 0;
 }
 
 int cmosh_transport_crypto_available(void)
 {
     return 1;
+}
+
+int cmosh_transport_make_packet(const unsigned char key[16], uint64_t seq,
+                                uint64_t old_num, uint64_t new_num,
+                                uint64_t ack_num,
+                                const unsigned char *diff, size_t diff_len,
+                                unsigned int timestamp,
+                                unsigned int echo_timestamp,
+                                unsigned char *packet, size_t packet_cap,
+                                size_t *packet_len)
+{
+    unsigned char instruction[512], compressed[640], fragment[704];
+    unsigned char plain[CMOSH_MAX_PACKET];
+    size_t instruction_len, compressed_len, fragment_len, plain_len;
+    struct cmosh_transport_instruction ti;
+
+    if (!key || (!diff && diff_len) || !packet || !packet_len)
+        return -1;
+
+    memset(&ti, 0, sizeof(ti));
+    ti.protocol_version = CMOSH_PROTOCOL_VERSION;
+    ti.old_num = old_num;
+    ti.new_num = new_num;
+    ti.ack_num = ack_num;
+    ti.diff = diff;
+    ti.diff_len = diff_len;
+    if (cmosh_encode_transport_instruction(&ti, instruction,
+                                           sizeof(instruction),
+                                           &instruction_len) != 0)
+        return -1;
+    if (cmosh_zlib_store_compress(instruction, instruction_len, compressed,
+                                  sizeof(compressed), &compressed_len) != 0)
+        return -1;
+    if (cmosh_encode_fragment(seq, 0, 1, compressed, compressed_len, fragment,
+                              sizeof(fragment), &fragment_len) != 0)
+        return -1;
+    if (fragment_len + 4 > sizeof(plain))
+        return -1;
+
+    plain[0] = (unsigned char)(timestamp >> 8);
+    plain[1] = (unsigned char)timestamp;
+    plain[2] = (unsigned char)(echo_timestamp >> 8);
+    plain[3] = (unsigned char)echo_timestamp;
+    memcpy(plain + 4, fragment, fragment_len);
+    plain_len = fragment_len + 4;
+
+    return cmosh_transport_encrypt_packet(key, CMOSH_CLIENT_NONCE_BASE | seq,
+                                          plain, plain_len, packet,
+                                          packet_cap, packet_len);
+}
+
+int cmosh_transport_decode_packet(
+    const unsigned char key[16], const unsigned char *packet,
+    size_t packet_len, struct cmosh_transport_instruction *ti,
+    unsigned char *diff_buf, size_t diff_buf_len, unsigned int *timestamp,
+    unsigned int *echo_timestamp, uint64_t *seq)
+{
+    unsigned char plain[CMOSH_MAX_PACKET], decompressed[8192];
+    size_t plain_len, decompressed_len;
+    struct cmosh_fragment frag;
+
+    if (!timestamp || !echo_timestamp || !ti || (!diff_buf && diff_buf_len))
+        return -1;
+    if (cmosh_transport_decrypt_packet(key, packet, packet_len, plain,
+                                       sizeof(plain), &plain_len, seq) != 0)
+        return -1;
+    if (plain_len < 4)
+        return -1;
+    *timestamp = ((unsigned)plain[0] << 8) | plain[1];
+    *echo_timestamp = ((unsigned)plain[2] << 8) | plain[3];
+    if (cmosh_decode_fragment(plain + 4, plain_len - 4, &frag) != 0)
+        return -1;
+    if (cmosh_zlib_store_decompress(frag.payload, frag.payload_len,
+                                    decompressed, sizeof(decompressed),
+                                    &decompressed_len) != 0)
+        return -1;
+    if (cmosh_decode_transport_instruction(decompressed, decompressed_len,
+                                           ti, NULL, NULL) != 0)
+        return -1;
+    if (ti->diff_len) {
+        if (!diff_buf || ti->diff_len > diff_buf_len)
+            return -1;
+        memcpy(diff_buf, ti->diff, ti->diff_len);
+        ti->diff = diff_buf;
+    }
+    if (ti->chaff_len)
+        ti->chaff = NULL;
+    return 0;
 }
 
 void cmosh_transport_nonce_from_seq(uint64_t seq, unsigned char nonce[8])
