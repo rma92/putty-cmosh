@@ -580,6 +580,28 @@ static void test_client(void)
               event.result == CMOSH_CLIENT_RECV_DUPLICATE,
               "client process duplicate");
     }
+
+    cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 20,
+                      0, 6);
+    memset(&ti, 0, sizeof(ti));
+    ti.old_num = 8;
+    ti.new_num = 9;
+    ti.diff = (const unsigned char *)"g";
+    ti.diff_len = 1;
+    check(cmosh_client_note_server_instruction(&client, &ti, &queued_future,
+                                               &previous_state) == 0 &&
+              queued_future,
+          "client idle setup gap");
+    {
+        struct cmosh_client_idle_event idle_event;
+        check(cmosh_client_make_idle_event(
+                  &client, CMOSH_CLIENT_UDP_TIMEOUT_DIAG_MS,
+                  0x6666, packet, sizeof(packet), &n, &idle_event) == 0 &&
+              idle_event.missing_state && idle_event.udp_timeout &&
+              !idle_event.retransmitted && idle_event.gap_old_num == 8 &&
+              idle_event.gap_new_num == 9,
+              "client idle event diagnostics");
+    }
 }
 
 int main(void)

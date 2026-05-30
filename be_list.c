@@ -7,7 +7,7 @@
  * directly to the sources list for an application. Instead you call
  * the be_list() function defined in setup.cmake, e.g.
  *
- *    be_list(target-name AppName [SSH] [SERIAL] [OTHERBACKENDS])
+ *    be_list(target-name AppName [SSH] [SERIAL] [OTHERBACKENDS] [MOSH])
  *
  * This translates into the following command-line macro definitions
  * used by the code below:
@@ -28,6 +28,8 @@
  *
  *     * OTHERBACKENDS: the non-cryptographic network protocol backends
  *       (Telnet, Rlogin, SUPDUP, Raw)
+ *
+ *     * MOSH: the Mosh backend
  */
 
 #include <stdio.h>
@@ -69,6 +71,10 @@ const struct BackendVtable *const backends[] = {
      */
 #if SERIAL
     &serial_backend,
+#endif
+
+#if MOSH
+    &mosh_backend,
 #endif
 
     /*

@@ -48,6 +48,14 @@ struct cmosh_client_recv_event {
     int should_ack;
 };
 
+struct cmosh_client_idle_event {
+    int missing_state;
+    int udp_timeout;
+    int retransmitted;
+    uint64_t gap_old_num;
+    uint64_t gap_new_num;
+};
+
 void cmosh_client_init(struct cmosh_client *client,
                        const unsigned char key[16],
                        uint64_t initial_client_ack,
@@ -81,6 +89,10 @@ int cmosh_client_make_idle(struct cmosh_client *client, uint64_t now_ms,
                            unsigned int now16, unsigned char *packet,
                            size_t packet_cap, size_t *packet_len,
                            int *retransmitted);
+int cmosh_client_make_idle_event(struct cmosh_client *client, uint64_t now_ms,
+                                 unsigned int now16, unsigned char *packet,
+                                 size_t packet_cap, size_t *packet_len,
+                                 struct cmosh_client_idle_event *event);
 enum cmosh_client_recv_result cmosh_client_recv_packet(
     struct cmosh_client *client, const unsigned char *packet,
     size_t packet_len, struct cmosh_transport_instruction *ti,

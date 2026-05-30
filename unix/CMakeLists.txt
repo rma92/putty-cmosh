@@ -182,7 +182,7 @@ if(GTK_FOUND)
     putty.c
     main-gtk-simple.c
     ${CMAKE_SOURCE_DIR}/stubs/no-console.c)
-  be_list(putty PuTTY SSH SERIAL OTHERBACKENDS)
+  be_list(putty PuTTY SSH SERIAL OTHERBACKENDS MOSH)
   target_link_libraries(putty
     guiterminal eventloop sshclient otherbackends settings
     network crypto utils puttyxpms
@@ -197,7 +197,7 @@ if(GTK_FOUND)
       main-gtk-application.c
       ${CMAKE_SOURCE_DIR}/stubs/no-cmdline.c
       ${CMAKE_SOURCE_DIR}/stubs/no-console.c)
-    be_list(puttyapp PuTTY SSH SERIAL OTHERBACKENDS)
+    be_list(puttyapp PuTTY SSH SERIAL OTHERBACKENDS MOSH)
     target_link_libraries(puttyapp
       guiterminal eventloop sshclient otherbackends settings
       network crypto utils puttyxpms

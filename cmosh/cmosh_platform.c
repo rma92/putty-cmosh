@@ -772,13 +772,15 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                 }
                             }
                             if (!sent && ++idle % 20 == 0) {
-                                uint64_t gap_old, gap_new;
-                                int retransmitted = 0;
+                                struct cmosh_client_idle_event idle_event;
 
                                 now_ms = cmosh_now_ms();
-                                if (cmosh_client_missing_state_diag_due(
-                                        &client, now_ms, &gap_old,
-                                        &gap_new)) {
+                                if (cmosh_client_make_idle_event(
+                                        &client, now_ms, cmosh_now16_ms(),
+                                        packet, sizeof(packet), &packet_len,
+                                        &idle_event) != 0)
+                                    goto out_socket;
+                                if (idle_event.missing_state) {
                                     if (verbose)
                                         fprintf(stderr,
                                                 "cmosh: waiting for missing "
@@ -787,11 +789,12 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                 "%llu\n",
                                                 (unsigned long long)
                                                     client.server_state,
-                                                (unsigned long long)gap_old,
-                                                (unsigned long long)gap_new);
+                                                (unsigned long long)
+                                                    idle_event.gap_old_num,
+                                                (unsigned long long)
+                                                    idle_event.gap_new_num);
                                 }
-                                if (cmosh_client_udp_timeout_due(
-                                        &client, now_ms)) {
+                                if (idle_event.udp_timeout) {
                                     fprintf(stderr,
                                             "cmosh: UDP timeout; no server "
                                             "packet for %u seconds\n",
@@ -799,11 +802,6 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                 (CMOSH_CLIENT_UDP_TIMEOUT_DIAG_MS /
                                                  1000U));
                                 }
-                                if (cmosh_client_make_idle(
-                                        &client, now_ms, cmosh_now16_ms(),
-                                        packet, sizeof(packet), &packet_len,
-                                        &retransmitted) != 0)
-                                    goto out_socket;
                                 if (send(s, (const char *)packet,
                                          (int)packet_len, 0) == SOCKET_ERROR)
                                     goto out_socket;
@@ -815,7 +813,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                 client.server_state,
                                             (unsigned long long)
                                                 client.input.current,
-                                            retransmitted);
+                                            idle_event.retransmitted);
                                 }
                             }
                         }

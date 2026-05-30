@@ -145,3 +145,8 @@ Makefile
 /windows/*.msi
 /windows/*.wixobj
 /windows/*.wixpdb
+
+a.cmd
+ar.cmd
+b.cmd
+build

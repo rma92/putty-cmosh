@@ -439,7 +439,7 @@ enum {
 
 enum {
     /* Protocol back ends. (CONF_protocol) */
-    PROT_RAW, PROT_TELNET, PROT_RLOGIN, PROT_SSH, PROT_SSHCONN,
+    PROT_RAW, PROT_TELNET, PROT_RLOGIN, PROT_SSH, PROT_SSHCONN, PROT_MOSH,
     /* PROT_SERIAL is supported on a subset of platforms, but it doesn't
      * hurt to define it globally. */
     PROT_SERIAL,
@@ -2180,6 +2180,12 @@ extern const struct BackendVtable loop_backend;
  */
 
 extern const struct BackendVtable raw_backend;
+
+/*
+ * Exports from mosh.c.
+ */
+
+extern const struct BackendVtable mosh_backend;
 
 /*
  * Exports from rlogin.c.

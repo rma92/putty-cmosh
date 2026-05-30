@@ -105,7 +105,7 @@ add_executable(putty
   help.c
   ${CMAKE_SOURCE_DIR}/stubs/no-console.c
   putty.rc)
-be_list(putty PuTTY SSH SERIAL OTHERBACKENDS)
+be_list(putty PuTTY SSH SERIAL OTHERBACKENDS MOSH)
 add_dependencies(putty generated_licence_h)
 target_link_libraries(putty
   guiterminal guimisc eventloop sshclient otherbackends settings network crypto

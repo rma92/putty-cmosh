@@ -146,6 +146,35 @@ int cmosh_client_make_idle(struct cmosh_client *client, uint64_t now_ms,
         client->echo_timestamp, packet, packet_cap, packet_len);
 }
 
+int cmosh_client_make_idle_event(struct cmosh_client *client, uint64_t now_ms,
+                                 unsigned int now16, unsigned char *packet,
+                                 size_t packet_cap, size_t *packet_len,
+                                 struct cmosh_client_idle_event *event)
+{
+    int retransmitted = 0;
+
+    if (event)
+        memset(event, 0, sizeof(*event));
+    if (!client)
+        return -1;
+
+    if (event) {
+        event->missing_state = cmosh_client_missing_state_diag_due(
+            client, now_ms, &event->gap_old_num, &event->gap_new_num);
+        event->udp_timeout = cmosh_client_udp_timeout_due(client, now_ms);
+    } else {
+        (void)cmosh_client_missing_state_diag_due(client, now_ms, NULL, NULL);
+        (void)cmosh_client_udp_timeout_due(client, now_ms);
+    }
+
+    if (cmosh_client_make_idle(client, now_ms, now16, packet, packet_cap,
+                               packet_len, &retransmitted) != 0)
+        return -1;
+    if (event)
+        event->retransmitted = retransmitted;
+    return 0;
+}
+
 enum cmosh_client_recv_result cmosh_client_recv_packet(
     struct cmosh_client *client, const unsigned char *packet,
     size_t packet_len, struct cmosh_transport_instruction *ti,
