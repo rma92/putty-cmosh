@@ -66,7 +66,7 @@ struct NetSocket {
     bool localhost_only;               /* for listening sockets */
     char oobdata[1];
     size_t sending_oob;
-    bool oobinline, nodelay, keepalive, privport;
+    bool oobinline, nodelay, keepalive, privport, datagram;
     enum { EOF_NO, EOF_PENDING, EOF_SENT } outgoingeof;
     SockAddr *addr;
     SockAddrStep step;
@@ -876,6 +876,7 @@ static Socket *sk_net_accept(accept_ctx_t ctx, Plug *plug)
     }
 
     s->oobinline = false;
+    s->datagram = false;
 
     /* Set up a select mechanism. This could be an AsyncSelect on a
      * window, or an EventSelect on an event object. */
@@ -927,7 +928,7 @@ static DWORD try_connect(NetSocket *sock)
      */
     del234(sktree, sock);
 
-    s = p_socket(family, SOCK_STREAM, 0);
+    s = p_socket(family, sock->datagram ? SOCK_DGRAM : SOCK_STREAM, 0);
     sock->s = s;
 
     if (s == INVALID_SOCKET) {
@@ -943,7 +944,7 @@ static DWORD try_connect(NetSocket *sock)
         p_setsockopt(s, SOL_SOCKET, SO_OOBINLINE, (void *) &b, sizeof(b));
     }
 
-    if (sock->nodelay) {
+    if (sock->nodelay && !sock->datagram) {
         BOOL b = true;
         p_setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (void *) &b, sizeof(b));
     }
@@ -1070,6 +1071,8 @@ static DWORD try_connect(NetSocket *sock)
          * and we should set the socket as writable.
          */
         sock->writable = true;
+        if (sock->datagram)
+            sock->connected = true;
         SockAddr thisaddr = sk_extractaddr_tmp(sock->addr, &sock->step);
         plug_log(sock->plug, &sock->sock, PLUGLOG_CONNECT_SUCCESS,
                  &thisaddr, sock->port, NULL, 0);
@@ -1120,6 +1123,44 @@ Socket *sk_new(SockAddr *addr, int port, bool privport, bool oobinline,
     s->nodelay = nodelay;
     s->keepalive = keepalive;
     s->privport = privport;
+    s->datagram = false;
+    s->port = port;
+    s->addr = addr;
+    START_STEP(s->addr, s->step);
+    s->s = INVALID_SOCKET;
+
+    err = 0;
+    do {
+        err = try_connect(s);
+    } while (err && sk_nextaddr(s->addr, &s->step));
+
+    return &s->sock;
+}
+
+Socket *sk_new_udp(SockAddr *addr, int port, Plug *plug)
+{
+    NetSocket *s;
+    DWORD err;
+
+    s = snew(NetSocket);
+    s->sock.vt = &NetSocket_sockvt;
+    s->error = NULL;
+    s->plug = plug;
+    bufchain_init(&s->output_data);
+    s->connected = false;
+    s->writable = false;
+    s->sending_oob = 0;
+    s->outgoingeof = EOF_NO;
+    s->frozen = false;
+    s->frozen_readable = false;
+    s->localhost_only = false;
+    s->pending_error = 0;
+    s->parent = s->child = NULL;
+    s->oobinline = false;
+    s->nodelay = false;
+    s->keepalive = false;
+    s->privport = false;
+    s->datagram = true;
     s->port = port;
     s->addr = addr;
     START_STEP(s->addr, s->step);
@@ -1172,6 +1213,7 @@ static Socket *sk_newlistener_internal(
     s->pending_error = 0;
     s->parent = s->child = NULL;
     s->addr = NULL;
+    s->datagram = false;
 
     /*
      * Our default, if passed the `don't care' value
@@ -1197,6 +1239,7 @@ static Socket *sk_newlistener_internal(
     SetHandleInformation((HANDLE)sk, HANDLE_FLAG_INHERIT, 0);
 
     s->oobinline = false;
+    s->datagram = false;
 
 #if HAVE_AFUNIX_H
     if (address_family != AF_UNIX)
@@ -1503,6 +1546,20 @@ static size_t sk_net_write(Socket *sock, const void *buf, size_t len)
     NetSocket *s = container_of(sock, NetSocket, sock);
 
     assert(s->outgoingeof == EOF_NO);
+
+    if (s->datagram) {
+        int nsent = p_send(s->s, buf, min(len, INT_MAX), 0);
+        noise_ultralight(NOISE_SOURCE_IOLEN, nsent);
+        if (nsent < 0) {
+            DWORD err = p_WSAGetLastError();
+            if (err != WSAEWOULDBLOCK) {
+                s->pending_error = err;
+                queue_toplevel_callback(socket_error_callback, s);
+            }
+            return len;
+        }
+        return 0;
+    }
 
     /*
      * Add the data to the buffer list on the socket.

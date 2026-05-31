@@ -78,6 +78,7 @@ struct NetSocket {
     bool listener;
     bool nodelay, keepalive;           /* for connect()-type sockets */
     bool privport;
+    bool datagram;
     int port;                          /* and again */
     SockAddr *addr;
     SockAddrStep step;
@@ -536,6 +537,7 @@ static Socket *sk_net_accept(accept_ctx_t ctx, Plug *plug)
     }
 
     s->oobinline = false;
+    s->datagram = false;
 
     uxsel_tell(s);
     add234(sktree, s);
@@ -575,7 +577,7 @@ static int try_connect(NetSocket *sock)
      */
     family = SOCKADDR_FAMILY(sock->addr, sock->step);
     assert(family != AF_UNSPEC);
-    s = socket(family, SOCK_STREAM, 0);
+    s = socket(family, sock->datagram ? SOCK_DGRAM : SOCK_STREAM, 0);
     sock->s = s;
 
     if (s < 0) {
@@ -595,7 +597,7 @@ static int try_connect(NetSocket *sock)
         }
     }
 
-    if (sock->nodelay && family != AF_UNIX) {
+    if (sock->nodelay && !sock->datagram && family != AF_UNIX) {
         int b = 1;
         if (setsockopt(s, IPPROTO_TCP, TCP_NODELAY,
                        (void *) &b, sizeof(b)) < 0) {
@@ -779,6 +781,48 @@ Socket *sk_new(SockAddr *addr, int port, bool privport, bool oobinline,
     s->nodelay = nodelay;
     s->keepalive = keepalive;
     s->privport = privport;
+    s->datagram = false;
+    s->port = port;
+
+    do {
+        err = try_connect(s);
+    } while (err && sk_nextaddr(s->addr, &s->step));
+
+    if (err)
+        s->error = strerror(err);
+
+    return &s->sock;
+}
+
+Socket *sk_new_udp(SockAddr *addr, int port, Plug *plug)
+{
+    NetSocket *s;
+    int err;
+
+    s = snew(NetSocket);
+    s->sock.vt = &NetSocket_sockvt;
+    s->error = NULL;
+    s->plug = plug;
+    bufchain_init(&s->output_data);
+    s->connected = false;
+    s->writable = false;
+    s->sending_oob = 0;
+    s->frozen = false;
+    s->localhost_only = false;
+    s->pending_error = 0;
+    s->parent = s->child = NULL;
+    s->oobpending = false;
+    s->outgoingeof = EOF_NO;
+    s->incomingeof = false;
+    s->listener = false;
+    s->addr = addr;
+    START_STEP(s->addr, s->step);
+    s->s = -1;
+    s->oobinline = false;
+    s->nodelay = false;
+    s->keepalive = false;
+    s->privport = false;
+    s->datagram = true;
     s->port = port;
 
     do {
@@ -827,6 +871,7 @@ Socket *sk_newlistener(const char *srcaddr, int port, Plug *plug,
     s->listener = true;
     s->addr = NULL;
     s->s = -1;
+    s->datagram = false;
 
     /*
      * Translate address_family from platform-independent constants
@@ -868,6 +913,7 @@ Socket *sk_newlistener(const char *srcaddr, int port, Plug *plug,
     cloexec(fd);
 
     s->oobinline = false;
+    s->datagram = false;
 
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
                    (const char *)&on, sizeof(on)) < 0) {
@@ -1190,6 +1236,20 @@ static size_t sk_net_write(Socket *sock, const void *buf, size_t len)
     NetSocket *s = container_of(sock, NetSocket, sock);
 
     assert(s->outgoingeof == EOF_NO);
+
+    if (s->datagram) {
+        int nsent = send(s->s, buf, len, MSG_NOSIGNAL);
+        noise_ultralight(NOISE_SOURCE_IOLEN, nsent);
+        if (nsent < 0) {
+            if (errno != EWOULDBLOCK) {
+                s->pending_error = errno;
+                uxsel_tell(s);
+                queue_toplevel_callback(socket_error_callback, s);
+            }
+            return len;
+        }
+        return 0;
+    }
 
     /*
      * Add the data to the buffer list on the socket.
@@ -1702,6 +1762,7 @@ Socket *new_unix_listener(SockAddr *listenaddr, Plug *plug)
     s->listener = true;
     s->addr = listenaddr;
     s->s = -1;
+    s->datagram = false;
 
     assert(listenaddr->superfamily == UNIX);
 
@@ -1717,6 +1778,7 @@ Socket *new_unix_listener(SockAddr *listenaddr, Plug *plug)
     cloexec(fd);
 
     s->oobinline = false;
+    s->datagram = false;
 
     memset(&u, '\0', sizeof(u));
     u.su.sun_family = AF_UNIX;

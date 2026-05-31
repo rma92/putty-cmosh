@@ -8,7 +8,11 @@
 
 #include "putty.h"
 #include "cmosh_bootstrap.h"
+#include "cmosh_client.h"
+#include "cmosh_proto.h"
+#include "cmosh_transport.h"
 
+#include <stdio.h>
 #include <string.h>
 
 typedef struct Mosh Mosh;
@@ -17,17 +21,25 @@ struct Mosh {
     Backend backend;
     Interactor interactor;
     Seat bootstrap_seat;
+    Plug udp_plug;
     Seat *seat;
     Conf *conf;
     Conf *ssh_conf;
     LogContext *logctx;
     Backend *ssh_backend;
+    Socket *udp_socket;
+    struct cmosh_client client;
     strbuf *bootstrap_output;
     struct cmosh_bootstrap bootstrap;
     char udp_host[256];
     char *description;
     char *bootstrap_command;
     char *ssh_host;
+    unsigned int cols, rows;
+    int exitcode;
+    bool udp_started;
+    bool udp_start_queued;
+    bool udp_ready;
     bool ssh_disconnected;
     bool remote_exited;
     bool shutdown;
@@ -35,6 +47,9 @@ struct Mosh {
 };
 
 static void mosh_free(Backend *be);
+static void mosh_timer(void *ctx, unsigned long now);
+static bool mosh_start_udp(Mosh *mosh);
+static void mosh_start_udp_callback(void *ctx);
 
 static char *mosh_description(Interactor *itr)
 {
@@ -128,6 +143,226 @@ static bool mosh_prepare_udp_target(Mosh *mosh)
     return true;
 }
 
+static unsigned int mosh_now16(unsigned long now)
+{
+    return (unsigned int)(now & 0xffffU);
+}
+
+static int mosh_host_output(void *vctx, const unsigned char *diff,
+                            size_t diff_len)
+{
+    Mosh *mosh = (Mosh *)vctx;
+    unsigned char host_output[8192];
+    size_t out_len = 0;
+
+    if (!diff_len)
+        return 0;
+    if (cmosh_decode_host_output(diff, diff_len, host_output,
+                                 sizeof(host_output), &out_len) != 0)
+        return -1;
+    if (out_len)
+        seat_stdout(mosh->seat, host_output, out_len);
+    return 0;
+}
+
+static bool mosh_udp_send(Mosh *mosh, const unsigned char *packet,
+                          size_t packet_len)
+{
+    if (!mosh->udp_socket || mosh->shutdown)
+        return false;
+    sk_write(mosh->udp_socket, packet, packet_len);
+    return true;
+}
+
+static void mosh_send_idle(Mosh *mosh, unsigned long now)
+{
+    unsigned char packet[CMOSH_MAX_PACKET];
+    size_t packet_len = 0;
+    struct cmosh_client_idle_event event;
+
+    if (!mosh->udp_ready || mosh->shutdown)
+        return;
+    if (cmosh_client_make_idle_event(&mosh->client, (uint64_t)now,
+                                     mosh_now16(now), packet, sizeof(packet),
+                                     &packet_len, &event) != 0)
+        return;
+    if (event.missing_state) {
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+                 "mosh: waiting for missing server state current=%llu "
+                 "wanted=%llu\r\n",
+                 (unsigned long long)event.gap_old_num,
+                 (unsigned long long)event.gap_new_num);
+        seat_stderr(mosh->seat, msg, strlen(msg));
+    }
+    if (event.udp_timeout) {
+        const char msg[] =
+            "mosh: UDP timeout; no server packet received recently\r\n";
+        seat_stderr(mosh->seat, msg, sizeof(msg) - 1);
+    }
+    if (packet_len)
+        mosh_udp_send(mosh, packet, packet_len);
+}
+
+static void mosh_timer(void *ctx, unsigned long now)
+{
+    Mosh *mosh = (Mosh *)ctx;
+
+    mosh_send_idle(mosh, now);
+    if (mosh->udp_socket && !mosh->shutdown)
+        schedule_timer(100, mosh_timer, mosh);
+}
+
+static void mosh_udp_log(Plug *plug, Socket *s, PlugLogType type,
+                         SockAddr *addr, int port, const char *error_msg,
+                         int error_code)
+{
+    Mosh *mosh = container_of(plug, Mosh, udp_plug);
+    backend_socket_log(mosh->seat, mosh->logctx, s, type, addr, port,
+                       error_msg, error_code, mosh->conf, mosh->udp_started);
+}
+
+static void mosh_udp_closing(Plug *plug, PlugCloseType type,
+                             const char *error_msg)
+{
+    Mosh *mosh = container_of(plug, Mosh, udp_plug);
+
+    mosh->shutdown = true;
+    if (type == PLUGCLOSE_NORMAL)
+        seat_notify_remote_exit(mosh->seat);
+    else if (error_msg)
+        seat_connection_fatal(mosh->seat, "%s", error_msg);
+    seat_notify_remote_disconnect(mosh->seat);
+}
+
+static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
+                             size_t len)
+{
+    Mosh *mosh = container_of(plug, Mosh, udp_plug);
+    unsigned char packet[CMOSH_MAX_PACKET], diff[8192];
+    struct cmosh_transport_instruction ti;
+    struct cmosh_client_recv_event event;
+    unsigned int timestamp = 0, echo_timestamp = 0;
+    uint64_t seq = 0;
+
+    if (urgent || mosh->shutdown)
+        return;
+
+    if (!mosh->udp_ready) {
+        if (cmosh_transport_decode_packet(
+                mosh->bootstrap.key, (const unsigned char *)data, len, &ti,
+                diff, sizeof(diff), &timestamp, &echo_timestamp, &seq) != 0)
+            return;
+
+        if (cmosh_client_make_start_ack(mosh->bootstrap.key, timestamp,
+                                        mosh_now16(GETTICKCOUNT()), packet,
+                                        sizeof(packet), &len) != 0)
+            return;
+        mosh_udp_send(mosh, packet, len);
+        cmosh_client_init(&mosh->client, mosh->bootstrap.key, ti.ack_num,
+                          ti.new_num, seq, timestamp, 3);
+        cmosh_client_note_recv_time(&mosh->client,
+                                    (uint64_t)GETTICKCOUNT());
+        if (ti.diff_len)
+            mosh_host_output(mosh, ti.diff, ti.diff_len);
+        mosh->udp_ready = true;
+        seat_notify_session_started(mosh->seat);
+        return;
+    }
+
+    if (cmosh_client_process_packet(&mosh->client,
+                                    (const unsigned char *)data, len, diff,
+                                    sizeof(diff), mosh_host_output, mosh,
+                                    &event) == CMOSH_CLIENT_RECV_BAD_PACKET)
+        return;
+    if (event.result == CMOSH_CLIENT_RECV_DUPLICATE)
+        return;
+
+    cmosh_client_note_recv_time(&mosh->client, (uint64_t)GETTICKCOUNT());
+
+    if (event.server_shutdown) {
+        mosh->shutdown = true;
+        mosh->exitcode = 0;
+        seat_notify_remote_exit(mosh->seat);
+        seat_notify_remote_disconnect(mosh->seat);
+        return;
+    }
+
+    if (event.should_ack &&
+        cmosh_client_make_ack(&mosh->client, mosh_now16(GETTICKCOUNT()),
+                              packet, sizeof(packet), &len) == 0)
+        mosh_udp_send(mosh, packet, len);
+}
+
+static const PlugVtable Mosh_udp_plugvt = {
+    .log = mosh_udp_log,
+    .closing = mosh_udp_closing,
+    .receive = mosh_udp_receive,
+    .sent = nullplug_sent,
+    .accepting = NULL,
+};
+
+static bool mosh_start_udp(Mosh *mosh)
+{
+    SockAddr *addr;
+    char *realhost = NULL;
+    const char *err;
+    unsigned char packet[CMOSH_MAX_PACKET];
+    size_t packet_len = 0, diff_len = 0;
+    int addressfamily;
+
+    if (mosh->udp_started)
+        return true;
+    if (!mosh->bootstrap.port || !mosh->udp_target_ready)
+        return false;
+
+    addressfamily = conf_get_int(mosh->conf, CONF_addressfamily);
+    addr = name_lookup(mosh->udp_host, mosh->bootstrap.port, &realhost,
+                       mosh->conf, addressfamily, mosh->logctx, "mosh UDP");
+    if ((err = sk_addr_error(addr)) != NULL) {
+        seat_connection_fatal(mosh->seat, "Mosh UDP lookup failed: %s", err);
+        sk_addr_free(addr);
+        sfree(realhost);
+        return false;
+    }
+
+    mosh->udp_socket = sk_new_udp(addr, mosh->bootstrap.port, &mosh->udp_plug);
+    sfree(realhost);
+    if ((err = sk_socket_error(mosh->udp_socket)) != NULL) {
+        seat_connection_fatal(mosh->seat, "Mosh UDP connect failed: %s", err);
+        return false;
+    }
+
+    mosh->udp_started = true;
+    if (cmosh_client_make_initial_packet(
+            mosh->bootstrap.key, mosh->cols ? mosh->cols : 80,
+            mosh->rows ? mosh->rows : 24, mosh_now16(GETTICKCOUNT()), packet,
+            sizeof(packet), &packet_len, &diff_len) != 0) {
+        seat_connection_fatal(mosh->seat,
+                              "Mosh initial packet could not be encoded");
+        return false;
+    }
+
+    mosh_udp_send(mosh, packet, packet_len);
+    schedule_timer(100, mosh_timer, mosh);
+
+    if (mosh->ssh_backend) {
+        Backend *child = mosh->ssh_backend;
+        mosh->ssh_backend = NULL;
+        backend_free(child);
+    }
+    return true;
+}
+
+static void mosh_start_udp_callback(void *ctx)
+{
+    Mosh *mosh = (Mosh *)ctx;
+
+    mosh->udp_start_queued = false;
+    if (!mosh->shutdown)
+        mosh_start_udp(mosh);
+}
+
 static size_t mosh_bootstrap_output(Seat *seat, SeatOutputType type,
                                     const void *data, size_t len)
 {
@@ -135,8 +370,12 @@ static size_t mosh_bootstrap_output(Seat *seat, SeatOutputType type,
 
     if (!mosh->bootstrap.port) {
         memcpy(strbuf_append(mosh->bootstrap_output, len), data, len);
-        if (mosh_parse_bootstrap_output(mosh))
-            mosh_prepare_udp_target(mosh);
+        if (mosh_parse_bootstrap_output(mosh) &&
+            mosh_prepare_udp_target(mosh) && !mosh->udp_start_queued &&
+            !mosh->udp_started) {
+            mosh->udp_start_queued = true;
+            queue_toplevel_callback(mosh_start_udp_callback, mosh);
+        }
     }
     return 0;
 }
@@ -170,12 +409,13 @@ static void mosh_bootstrap_notify_remote_disconnect(Seat *seat)
     Mosh *mosh = container_of(seat, Mosh, bootstrap_seat);
 
     mosh->ssh_disconnected = true;
-    mosh->shutdown = true;
 
-    if (mosh->bootstrap.port && mosh->udp_target_ready) {
+    if (mosh->udp_started) {
+        return;
+    } else if (mosh->bootstrap.port && mosh->udp_target_ready) {
         seat_connection_fatal(mosh->seat,
-                              "Native Mosh UDP session to %s:%u is not "
-                              "implemented yet",
+                              "Mosh SSH bootstrap succeeded, but UDP did not "
+                              "start for %s:%u",
                               mosh->udp_host, mosh->bootstrap.port);
     } else if (mosh->bootstrap.port) {
         seat_connection_fatal(mosh->seat,
@@ -188,6 +428,7 @@ static void mosh_bootstrap_notify_remote_disconnect(Seat *seat)
         seat_connection_fatal(mosh->seat,
                               "Mosh SSH bootstrap ended without output");
     }
+    mosh->shutdown = true;
     seat_notify_remote_disconnect(mosh->seat);
 }
 
@@ -363,12 +604,16 @@ static char *mosh_init(const BackendVtable *vt, Seat *seat,
     mosh->backend.interactor = &mosh->interactor;
     mosh->interactor.vt = &Mosh_interactorvt;
     mosh->bootstrap_seat.vt = &Mosh_bootstrap_seat_vt;
+    mosh->udp_plug.vt = &Mosh_udp_plugvt;
     mosh->seat = seat;
     mosh->conf = conf_copy(conf);
     mosh->logctx = logctx;
     mosh->description = default_description(vt, host, port);
     mosh->ssh_host = dupstr(host);
     mosh->bootstrap_output = strbuf_new();
+    mosh->cols = 80;
+    mosh->rows = 24;
+    mosh->exitcode = INT_MAX;
 
     mosh->bootstrap_command = mosh_build_remote_command("mosh-server",
                                                         "en_US.UTF-8");
@@ -399,6 +644,10 @@ static void mosh_free(Backend *be)
 {
     Mosh *mosh = container_of(be, Mosh, backend);
 
+    delete_callbacks_for_context(mosh);
+    expire_timer_context(mosh);
+    if (mosh->udp_socket)
+        sk_close(mosh->udp_socket);
     if (mosh->ssh_backend)
         backend_free(mosh->ssh_backend);
     if (mosh->bootstrap_output)
@@ -417,6 +666,25 @@ static void mosh_reconfig(Backend *be, Conf *conf)
 
 static void mosh_send(Backend *be, const char *buf, size_t len)
 {
+    Mosh *mosh = container_of(be, Mosh, backend);
+    unsigned char packet[CMOSH_MAX_PACKET];
+    size_t packet_len = 0;
+    uint64_t now;
+
+    if (!mosh->udp_ready || mosh->shutdown || !len)
+        return;
+
+    if (memchr(buf, 0x1d, len)) {
+        mosh->shutdown = true;
+        seat_notify_remote_disconnect(mosh->seat);
+        return;
+    }
+
+    now = (uint64_t)GETTICKCOUNT();
+    if (cmosh_client_make_input(&mosh->client, (const unsigned char *)buf,
+                                len, now, mosh_now16((unsigned long)now),
+                                packet, sizeof(packet), &packet_len) == 0)
+        mosh_udp_send(mosh, packet, packet_len);
 }
 
 static size_t mosh_sendbuffer(Backend *be)
@@ -426,6 +694,20 @@ static size_t mosh_sendbuffer(Backend *be)
 
 static void mosh_size(Backend *be, int width, int height)
 {
+    Mosh *mosh = container_of(be, Mosh, backend);
+    unsigned char packet[CMOSH_MAX_PACKET];
+    size_t packet_len = 0;
+
+    mosh->cols = width > 0 ? (unsigned int)width : 80;
+    mosh->rows = height > 0 ? (unsigned int)height : 24;
+
+    if (!mosh->udp_ready || mosh->shutdown)
+        return;
+
+    if (cmosh_client_make_resize(&mosh->client, mosh->cols, mosh->rows,
+                                 mosh_now16(GETTICKCOUNT()), packet,
+                                 sizeof(packet), &packet_len) == 0)
+        mosh_udp_send(mosh, packet, packet_len);
 }
 
 static void mosh_special(Backend *be, SessionSpecialCode code, int arg)
@@ -445,12 +727,14 @@ static bool mosh_connected(Backend *be)
 
 static int mosh_exitcode(Backend *be)
 {
-    return INT_MAX;
+    Mosh *mosh = container_of(be, Mosh, backend);
+    return mosh->exitcode;
 }
 
 static bool mosh_sendok(Backend *be)
 {
-    return false;
+    Mosh *mosh = container_of(be, Mosh, backend);
+    return mosh->udp_ready && !mosh->shutdown;
 }
 
 static bool mosh_ldisc_option_state(Backend *be, int option)

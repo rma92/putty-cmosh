@@ -236,6 +236,7 @@ SockAddr *sk_addr_dup(SockAddr *addr);
  * for freeing it, as for new_connection() */
 Socket *sk_new(SockAddr *addr, int port, bool privport, bool oobinline,
                bool nodelay, bool keepalive, Plug *p);
+Socket *sk_new_udp(SockAddr *addr, int port, Plug *p);
 
 Socket *sk_newlistener(const char *srcaddr, int port, Plug *plug,
                        bool local_host_only, int address_family);
