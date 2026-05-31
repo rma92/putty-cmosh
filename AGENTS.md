@@ -28,11 +28,13 @@ Prefer this workflow:
 1. Inspect current git status and changed files.
 2. Read the existing plan or handoff notes if present.
 3. Search narrowly for the specific symbol, packet type, state transition, or protocol concept.
-4. Read only the top relevant files/functions.
+4. Read only the top relevant files/functions, preferably targeted line ranges around those functions instead of whole files.
 5. Make the smallest safe change.
 6. Summarize what changed and what remains.
 
 Do not dump large command outputs into the conversation.
+
+If a command returns too much output, rerun it with a narrower query or summarize only the relevant lines. As a rule of thumb, avoid producing more than about 80 lines of tool output unless the user explicitly asks for the full output.
 
 When searching, prefer commands that return filenames or limited matches:
 
@@ -62,11 +64,13 @@ git diff -U3 -- path\to\file.c
 
 Do not repeatedly print full repository-wide diffs.
 
+After `/compact`, do not re-read unchanged files just to rediscover prior context. Use the handoff note and focused diffs first, then read only the specific functions whose behavior is unclear.
+
 ## Before and after `/compact`
 
 Because `/compact` is used frequently, maintain continuity.
 
-At natural checkpoints, produce or update a compact handoff note containing:
+Keep persistent handoff notes in `CMOSH_HANDOFF.md` at the repository root. At natural checkpoints, update that file with a compact note containing:
 
 * current goal
 * files touched
@@ -78,10 +82,12 @@ At natural checkpoints, produce or update a compact handoff note containing:
 
 Keep handoff notes concise and factual.
 
+Do not duplicate large diffs, build logs, or broad investigation notes in `CMOSH_HANDOFF.md`. Keep it as a recovery aid: enough to resume quickly, not a transcript.
+
 After `/compact`, first recover context from:
 
 1. current working tree
-2. latest handoff note
+2. latest `CMOSH_HANDOFF.md` handoff note
 3. existing plan
 4. `git status`
 5. small targeted diffs
@@ -125,6 +131,8 @@ When modifying existing logic:
 Run focused checks before broad ones.
 
 Prefer tests or builds that are directly relevant to the changed files first.
+
+Do not run full builds or broad test suites until focused builds/tests pass, unless the change touches shared infrastructure where a broad check is the focused check.
 
 When reporting results, summarize only:
 
