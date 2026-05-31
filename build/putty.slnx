@@ -39,6 +39,10 @@
 		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
 		<BuildDependency Project="utils.vcxproj"/>
 	</Project>
+	<Project Path="cmosh/cmosh_core_embedded.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="c9dc9b09-c4c2-3538-b8f2-858fdae16392">
+		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
+	</Project>
 	<Project Path="console.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="f1ad4f82-9bb1-3af9-96cd-acc2dc48477b">
 		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
 	</Project>
@@ -103,7 +107,9 @@
 	<Project Path="otherbackends.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="2d9faa1d-e2d3-3dda-b1b6-970a4a339ca0">
 		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
 		<BuildDependency Project="all-backends.vcxproj"/>
+		<BuildDependency Project="cmosh/cmosh_core_embedded.vcxproj"/>
 		<BuildDependency Project="logging.vcxproj"/>
+		<BuildDependency Project="utils.vcxproj"/>
 	</Project>
 	<Project Path="windows/pageant.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="cf8560ee-7f01-3ce4-87ca-64d7d053eb6a">
 		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
@@ -117,6 +123,7 @@
 	</Project>
 	<Project Path="plink.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="d56924a0-dd66-3451-91e7-fe311bbe748b">
 		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="cmosh/cmosh_core_embedded.vcxproj"/>
 		<BuildDependency Project="console.vcxproj"/>
 		<BuildDependency Project="crypto.vcxproj"/>
 		<BuildDependency Project="eventloop.vcxproj"/>
@@ -187,6 +194,7 @@
 	</Project>
 	<Project Path="windows/putty.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="86d6959a-0fa0-3f82-9734-84089f0736bf">
 		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="cmosh/cmosh_core_embedded.vcxproj"/>
 		<BuildDependency Project="crypto.vcxproj"/>
 		<BuildDependency Project="eventloop.vcxproj"/>
 		<BuildDependency Project="generated_licence_h.vcxproj"/>
@@ -212,6 +220,7 @@
 	</Project>
 	<Project Path="windows/puttytel.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="4eaa4872-d6dc-3f76-b171-282f1c6dad61">
 		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="cmosh/cmosh_core_embedded.vcxproj"/>
 		<BuildDependency Project="eventloop.vcxproj"/>
 		<BuildDependency Project="generated_licence_h.vcxproj"/>
 		<BuildDependency Project="windows/guimisc.vcxproj"/>
@@ -260,6 +269,7 @@
 	</Project>
 	<Project Path="test_conf.vcxproj" Type="8bc9ceb8-8b4a-11d0-8d11-00a0c91bc942" Id="1a007bb2-3688-37ee-8393-59f2ca4e69b3">
 		<BuildDependency Project="ZERO_CHECK.vcxproj"/>
+		<BuildDependency Project="cmosh/cmosh_core_embedded.vcxproj"/>
 		<BuildDependency Project="crypto.vcxproj"/>
 		<BuildDependency Project="network.vcxproj"/>
 		<BuildDependency Project="otherbackends.vcxproj"/>
@@ -332,6 +342,7 @@
 			<BuildDependency Project="bidi_test.vcxproj"/>
 			<BuildDependency Project="cmosh/cmosh.vcxproj"/>
 			<BuildDependency Project="cmosh/cmosh_core.vcxproj"/>
+			<BuildDependency Project="cmosh/cmosh_core_embedded.vcxproj"/>
 			<BuildDependency Project="console.vcxproj"/>
 			<BuildDependency Project="crypto.vcxproj"/>
 			<BuildDependency Project="eventloop.vcxproj"/>

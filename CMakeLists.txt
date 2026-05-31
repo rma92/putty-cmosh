@@ -160,6 +160,8 @@ target_link_libraries(psocks
   ${platform_libraries})
 
 add_subdirectory(cmosh)
+target_include_directories(otherbackends PRIVATE ${CMAKE_SOURCE_DIR}/cmosh)
+target_link_libraries(otherbackends cmosh_core_embedded)
 
 add_executable(test_conf
   test/test_conf.c

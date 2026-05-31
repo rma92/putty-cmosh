@@ -1,4 +1,4 @@
-add_library(cmosh_core STATIC
+set(CMOSH_CORE_SOURCES
   cmosh_aes.c
   cmosh_base64.c
   cmosh_bootstrap.c
@@ -7,8 +7,16 @@ add_library(cmosh_core STATIC
   cmosh_ocb.c
   cmosh_proto.c
   cmosh_session.c
-  cmosh_stubs.c
   cmosh_transport.c)
+
+add_library(cmosh_core_embedded STATIC
+  ${CMOSH_CORE_SOURCES})
+target_include_directories(cmosh_core_embedded PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(cmosh_core_embedded utils)
+
+add_library(cmosh_core STATIC
+  ${CMOSH_CORE_SOURCES}
+  cmosh_stubs.c)
 
 target_include_directories(cmosh_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_sources(cmosh_core PRIVATE ${CMAKE_SOURCE_DIR}/ssh/zlib.c)
