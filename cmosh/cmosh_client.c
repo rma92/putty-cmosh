@@ -64,9 +64,9 @@ int cmosh_client_make_ack(struct cmosh_client *client, unsigned int now16,
 }
 
 int cmosh_client_make_resize(struct cmosh_client *client, unsigned int cols,
-                             unsigned int rows, unsigned int now16,
-                             unsigned char *packet, size_t packet_cap,
-                             size_t *packet_len)
+                             unsigned int rows, uint64_t now_ms,
+                             unsigned int now16, unsigned char *packet,
+                             size_t packet_cap, size_t *packet_len)
 {
     unsigned char diff[64];
     size_t diff_len;
@@ -77,8 +77,9 @@ int cmosh_client_make_resize(struct cmosh_client *client, unsigned int cols,
     if (cmosh_encode_user_resize_message(cols, rows, diff, sizeof(diff),
                                          &diff_len) != 0)
         return -1;
-    old_client_state = client->input.current;
-    client->input.current++;
+    if (cmosh_input_append_diff(&client->input, diff, diff_len, now_ms) != 0)
+        return -1;
+    old_client_state = client->input.current - 1;
     return cmosh_transport_make_packet(
         client->key, client->send_seq++, old_client_state,
         client->input.current, client->server_state, diff, diff_len, now16,

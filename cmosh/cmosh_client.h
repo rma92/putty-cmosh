@@ -77,9 +77,9 @@ int cmosh_client_make_ack(struct cmosh_client *client, unsigned int now16,
                           unsigned char *packet, size_t packet_cap,
                           size_t *packet_len);
 int cmosh_client_make_resize(struct cmosh_client *client, unsigned int cols,
-                             unsigned int rows, unsigned int now16,
-                             unsigned char *packet, size_t packet_cap,
-                             size_t *packet_len);
+                             unsigned int rows, uint64_t now_ms,
+                             unsigned int now16, unsigned char *packet,
+                             size_t packet_cap, size_t *packet_len);
 int cmosh_client_make_input(struct cmosh_client *client,
                             const unsigned char *keys, size_t keys_len,
                             uint64_t now_ms, unsigned int now16,

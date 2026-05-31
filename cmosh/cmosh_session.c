@@ -30,8 +30,34 @@ int cmosh_input_append(struct cmosh_input_state *st,
     rec->len = keys_len;
     rec->last_sent_ms = now_ms;
     rec->send_count = 1;
+    rec->encoded_diff = 0;
     memcpy(st->bytes + st->bytes_len, keys, keys_len);
     st->bytes_len += keys_len;
+    return 0;
+}
+
+int cmosh_input_append_diff(struct cmosh_input_state *st,
+                            const unsigned char *diff, size_t diff_len,
+                            uint64_t now_ms)
+{
+    struct cmosh_input_record *rec;
+
+    if (!diff_len)
+        return 0;
+    if (!st || !diff || st->nrecords >= CMOSH_INPUT_MAX_RECORDS ||
+        diff_len > sizeof(st->bytes) - st->bytes_len)
+        return -1;
+
+    st->current++;
+    rec = &st->records[st->nrecords++];
+    rec->state = st->current;
+    rec->off = st->bytes_len;
+    rec->len = diff_len;
+    rec->last_sent_ms = now_ms;
+    rec->send_count = 1;
+    rec->encoded_diff = 1;
+    memcpy(st->bytes + st->bytes_len, diff, diff_len);
+    st->bytes_len += diff_len;
     return 0;
 }
 
@@ -91,6 +117,13 @@ int cmosh_input_record_diff(struct cmosh_input_state *st,
 {
     if (!st || !rec || rec->off + rec->len > st->bytes_len)
         return -1;
+    if (rec->encoded_diff) {
+        if (rec->len > diffbuf_len || !diff_len)
+            return -1;
+        memcpy(diffbuf, st->bytes + rec->off, rec->len);
+        *diff_len = rec->len;
+        return 0;
+    }
     return cmosh_encode_user_keystroke_message(st->bytes + rec->off, rec->len,
                                                diffbuf, diffbuf_len,
                                                diff_len);

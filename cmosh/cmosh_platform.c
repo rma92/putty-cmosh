@@ -636,7 +636,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                  cur_rows != last_rows)) {
                                 if (cmosh_client_make_resize(
                                         &client, cur_cols, cur_rows,
-                                        cmosh_now16_ms(), packet,
+                                        now_ms, cmosh_now16_ms(), packet,
                                         sizeof(packet), &packet_len) != 0)
                                     goto out_socket;
                                 if (send(s, (const char *)packet,

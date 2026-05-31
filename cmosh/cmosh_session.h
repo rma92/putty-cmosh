@@ -7,7 +7,7 @@
 #define CMOSH_INPUT_RETRY_FIRST_MS 5000U
 #define CMOSH_INPUT_RETRY_LATER_MS 10000U
 #define CMOSH_INPUT_MAX_RECORDS 128
-#define CMOSH_INPUT_MAX_BYTES 480
+#define CMOSH_INPUT_MAX_BYTES 4096
 #define CMOSH_SERVER_QUEUE 16
 #define CMOSH_SERVER_DIFF_MAX 8192
 
@@ -17,6 +17,7 @@ struct cmosh_input_record {
     size_t len;
     uint64_t last_sent_ms;
     unsigned int send_count;
+    int encoded_diff;
 };
 
 struct cmosh_input_state {
@@ -44,6 +45,9 @@ void cmosh_input_init(struct cmosh_input_state *st, uint64_t initial_state);
 int cmosh_input_append(struct cmosh_input_state *st,
                        const unsigned char *keys, size_t keys_len,
                        uint64_t now_ms);
+int cmosh_input_append_diff(struct cmosh_input_state *st,
+                            const unsigned char *diff, size_t diff_len,
+                            uint64_t now_ms);
 void cmosh_input_note_ack(struct cmosh_input_state *st, uint64_t acked);
 struct cmosh_input_record *cmosh_input_retransmit_record(
     struct cmosh_input_state *st, uint64_t now_ms);

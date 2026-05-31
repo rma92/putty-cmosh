@@ -762,6 +762,7 @@ static void mosh_size(Backend *be, int width, int height)
     Mosh *mosh = container_of(be, Mosh, backend);
     unsigned char packet[CMOSH_MAX_PACKET];
     size_t packet_len = 0;
+    unsigned long now;
 
     mosh->cols = width > 0 ? (unsigned int)width : 80;
     mosh->rows = height > 0 ? (unsigned int)height : 24;
@@ -769,8 +770,9 @@ static void mosh_size(Backend *be, int width, int height)
     if (!mosh->udp_ready || mosh->shutdown)
         return;
 
+    now = GETTICKCOUNT();
     if (cmosh_client_make_resize(&mosh->client, mosh->cols, mosh->rows,
-                                 mosh_now16(GETTICKCOUNT()), packet,
+                                 (uint64_t)now, mosh_now16(now), packet,
                                  sizeof(packet), &packet_len) == 0)
         mosh_udp_send(mosh, packet, packet_len);
 }

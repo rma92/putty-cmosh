@@ -541,7 +541,47 @@ static void test_client(void)
               client.input.acked == 11 && client.input.nrecords == 0,
           "client receive throwaway trims input");
 
-    check(cmosh_transport_make_packet(key, 9, 20, 21, 11,
+    check(cmosh_client_make_resize(&client, 132, 43, 200, 0x3999, packet,
+                                   sizeof(packet), &n) == 0 &&
+              client.input.current == 12 && client.input.nrecords == 1,
+          "client make resize tracks input state");
+    memset(&ti, 0, sizeof(ti));
+    check(cmosh_transport_decode_packet(key, packet, n, &ti, diff,
+                                        sizeof(diff), &timestamp, &timestamp,
+                                        &seq) == 0 &&
+              ti.old_num == 11 && ti.new_num == 12 && ti.diff_len != 0,
+          "client resize packet fields");
+    {
+        struct cmosh_client_idle_event idle_event;
+        size_t resize_diff_len = ti.diff_len;
+        unsigned char resize_diff[64];
+
+        memcpy(resize_diff, diff, resize_diff_len);
+        check(cmosh_client_make_idle_event(
+                  &client, 200 + CMOSH_INPUT_RETRY_FIRST_MS, 0x3aaa, packet,
+                  sizeof(packet), &n, &idle_event) == 0 &&
+                  idle_event.retransmitted,
+              "client resize retransmit due");
+        memset(&ti, 0, sizeof(ti));
+        check(cmosh_transport_decode_packet(key, packet, n, &ti, diff,
+                                            sizeof(diff), &timestamp,
+                                            &timestamp, &seq) == 0 &&
+                  ti.old_num == 11 && ti.new_num == 12 &&
+                  ti.diff_len == resize_diff_len &&
+                  memcmp(diff, resize_diff, resize_diff_len) == 0,
+              "client resize retransmits same diff");
+    }
+    check(make_test_transport_packet(key, 9, 20, 20, 10, 12, NULL, 0,
+                                     0x3bbb, packet, sizeof(packet), &n) == 0,
+          "client test resize ack packet");
+    memset(&ti, 0, sizeof(ti));
+    check(cmosh_client_recv_packet(&client, packet, n, &ti, diff,
+                                   sizeof(diff), &timestamp, &seq) ==
+              CMOSH_CLIENT_RECV_OK &&
+              client.input.acked == 12 && client.input.nrecords == 0,
+          "client receive ack trims resize");
+
+    check(cmosh_transport_make_packet(key, 10, 20, 21, 12,
                                       (const unsigned char *)"h", 1, 0x4444,
                                       0, packet, sizeof(packet), &n) == 0,
           "client test server packet");
@@ -549,8 +589,8 @@ static void test_client(void)
     check(cmosh_client_recv_packet(&client, packet, n, &ti, diff,
                                    sizeof(diff), &timestamp, &seq) ==
               CMOSH_CLIENT_RECV_OK &&
-              seq == (CMOSH_CLIENT_NONCE_BASE | 9) &&
-              client.input.acked == 11 &&
+              seq == (CMOSH_CLIENT_NONCE_BASE | 10) &&
+              client.input.acked == 12 &&
               client.echo_timestamp == 0x4444 && ti.diff_len == 1 &&
               diff[0] == 'h',
           "client receive packet");
