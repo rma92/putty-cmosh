@@ -2201,6 +2201,12 @@ static void mosh_request_redraw(WinGuiSeat *wgs)
         backend_special(wgs->backend, SS_NOP, 0);
 }
 
+static bool wm_size_should_resize_term(int resize_action)
+{
+    return resize_action == RESIZE_TERM ||
+        (resize_action == RESIZE_EITHER && !is_alt_pressed());
+}
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                                 WPARAM wParam, LPARAM lParam)
 {
@@ -3084,12 +3090,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                 wgs->was_zoomed = true;
                 wgs->prev_rows = wgs->term->rows;
                 wgs->prev_cols = wgs->term->cols;
-                if (resize_action == RESIZE_TERM)
+                if (wm_size_should_resize_term(resize_action))
                     wm_size_resize_term(wgs, lParam);
                 reset_window(wgs, 0);
             } else if (wParam == SIZE_RESTORED && wgs->was_zoomed) {
                 wgs->was_zoomed = false;
-                if (resize_action == RESIZE_TERM) {
+                if (wm_size_should_resize_term(resize_action)) {
                     wm_size_resize_term(wgs, lParam);
                     reset_window(wgs, 2);
                 } else if (resize_action != RESIZE_FONT)
@@ -3098,9 +3104,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                     reset_window(wgs, 0);
             } else if (wParam == SIZE_MINIMIZED) {
                 /* do nothing */
-            } else if (resize_action == RESIZE_TERM ||
-                       (resize_action == RESIZE_EITHER &&
-                        !is_alt_pressed())) {
+            } else if (wm_size_should_resize_term(resize_action)) {
                 wm_size_resize_term(wgs, lParam);
 
                 /*
