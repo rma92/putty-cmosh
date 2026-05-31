@@ -421,6 +421,46 @@ static int test_output_callback(void *vctx, const unsigned char *diff,
     return 0;
 }
 
+static int make_test_transport_packet(
+    const unsigned char key[16], uint64_t seq, uint64_t old_num,
+    uint64_t new_num, uint64_t ack_num, uint64_t throwaway_num,
+    const unsigned char *diff, size_t diff_len, unsigned int timestamp,
+    unsigned char *packet, size_t packet_cap, size_t *packet_len)
+{
+    unsigned char instruction[512], compressed[640], fragment[704];
+    unsigned char plain[CMOSH_MAX_PACKET];
+    size_t instruction_len, compressed_len, fragment_len, plain_len;
+    struct cmosh_transport_instruction ti;
+
+    memset(&ti, 0, sizeof(ti));
+    ti.protocol_version = CMOSH_PROTOCOL_VERSION;
+    ti.old_num = old_num;
+    ti.new_num = new_num;
+    ti.ack_num = ack_num;
+    ti.throwaway_num = throwaway_num;
+    ti.diff = diff;
+    ti.diff_len = diff_len;
+    if (cmosh_encode_transport_instruction(&ti, instruction,
+                                           sizeof(instruction),
+                                           &instruction_len) != 0)
+        return -1;
+    if (cmosh_zlib_store_compress(instruction, instruction_len, compressed,
+                                  sizeof(compressed), &compressed_len) != 0)
+        return -1;
+    if (cmosh_encode_fragment(seq, 0, 1, compressed, compressed_len, fragment,
+                              sizeof(fragment), &fragment_len) != 0)
+        return -1;
+    plain[0] = (unsigned char)(timestamp >> 8);
+    plain[1] = (unsigned char)timestamp;
+    plain[2] = 0;
+    plain[3] = 0;
+    memcpy(plain + 4, fragment, fragment_len);
+    plain_len = fragment_len + 4;
+    return cmosh_transport_encrypt_packet(key, CMOSH_CLIENT_NONCE_BASE | seq,
+                                          plain, plain_len, packet,
+                                          packet_cap, packet_len);
+}
+
 static void test_client(void)
 {
     struct cmosh_client client;
@@ -490,6 +530,16 @@ static void test_client(void)
               ti.old_num == 10 && ti.new_num == 11 &&
               ti.ack_num == 20 && ti.diff_len == 7,
           "client input packet fields");
+
+    check(make_test_transport_packet(key, 8, 20, 20, 10, 11, NULL, 0,
+                                     0x3888, packet, sizeof(packet), &n) == 0,
+          "client test throwaway packet");
+    memset(&ti, 0, sizeof(ti));
+    check(cmosh_client_recv_packet(&client, packet, n, &ti, diff,
+                                   sizeof(diff), &timestamp, &seq) ==
+              CMOSH_CLIENT_RECV_OK &&
+              client.input.acked == 11 && client.input.nrecords == 0,
+          "client receive throwaway trims input");
 
     check(cmosh_transport_make_packet(key, 9, 20, 21, 11,
                                       (const unsigned char *)"h", 1, 0x4444,

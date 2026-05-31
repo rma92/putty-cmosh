@@ -48,6 +48,8 @@ struct Mosh {
 
 static void mosh_free(Backend *be);
 static void mosh_timer(void *ctx, unsigned long now);
+static bool mosh_open_udp_socket(Mosh *mosh, bool fatal_on_error);
+static bool mosh_reopen_udp_socket(Mosh *mosh);
 static bool mosh_start_udp(Mosh *mosh);
 static void mosh_start_udp_callback(void *ctx);
 
@@ -198,6 +200,7 @@ static void mosh_send_idle(Mosh *mosh, unsigned long now)
     if (event.udp_timeout) {
         logevent(mosh->logctx,
                  "Mosh UDP timeout; no server packet received recently");
+        mosh_reopen_udp_socket(mosh);
     }
     if (packet_len)
         mosh_udp_send(mosh, packet, packet_len);
@@ -315,17 +318,13 @@ static const PlugVtable Mosh_udp_plugvt = {
     .accepting = NULL,
 };
 
-static bool mosh_start_udp(Mosh *mosh)
+static bool mosh_open_udp_socket(Mosh *mosh, bool fatal_on_error)
 {
     SockAddr *addr;
     char *realhost = NULL;
     const char *err;
-    unsigned char packet[CMOSH_MAX_PACKET];
-    size_t packet_len = 0, diff_len = 0;
     int addressfamily;
 
-    if (mosh->udp_started)
-        return true;
     if (!mosh->bootstrap.port || !mosh->udp_target_ready)
         return false;
 
@@ -333,7 +332,15 @@ static bool mosh_start_udp(Mosh *mosh)
     addr = name_lookup(mosh->udp_host, mosh->bootstrap.port, &realhost,
                        mosh->conf, addressfamily, mosh->logctx, "mosh UDP");
     if ((err = sk_addr_error(addr)) != NULL) {
-        seat_connection_fatal(mosh->seat, "Mosh UDP lookup failed: %s", err);
+        if (fatal_on_error)
+            seat_connection_fatal(mosh->seat, "Mosh UDP lookup failed: %s",
+                                  err);
+        else {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "Mosh UDP reopen lookup failed: %s",
+                     err);
+            logevent(mosh->logctx, msg);
+        }
         sk_addr_free(addr);
         sfree(realhost);
         return false;
@@ -342,9 +349,54 @@ static bool mosh_start_udp(Mosh *mosh)
     mosh->udp_socket = sk_new_udp(addr, mosh->bootstrap.port, &mosh->udp_plug);
     sfree(realhost);
     if ((err = sk_socket_error(mosh->udp_socket)) != NULL) {
-        seat_connection_fatal(mosh->seat, "Mosh UDP connect failed: %s", err);
+        Socket *failed_socket = mosh->udp_socket;
+        mosh->udp_socket = NULL;
+        if (failed_socket)
+            sk_close(failed_socket);
+        if (fatal_on_error)
+            seat_connection_fatal(mosh->seat, "Mosh UDP connect failed: %s",
+                                  err);
+        else {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "Mosh UDP reopen failed: %s", err);
+            logevent(mosh->logctx, msg);
+        }
         return false;
     }
+
+    return true;
+}
+
+static bool mosh_reopen_udp_socket(Mosh *mosh)
+{
+    Socket *old_socket;
+
+    if (!mosh->udp_started || mosh->shutdown)
+        return false;
+
+    old_socket = mosh->udp_socket;
+    mosh->udp_socket = NULL;
+
+    if (!mosh_open_udp_socket(mosh, false)) {
+        mosh->udp_socket = old_socket;
+        return false;
+    }
+
+    if (old_socket)
+        sk_close(old_socket);
+    logevent(mosh->logctx, "Mosh UDP socket reopened after timeout");
+    return true;
+}
+
+static bool mosh_start_udp(Mosh *mosh)
+{
+    unsigned char packet[CMOSH_MAX_PACKET];
+    size_t packet_len = 0, diff_len = 0;
+
+    if (mosh->udp_started)
+        return true;
+    if (!mosh_open_udp_socket(mosh, true))
+        return false;
 
     mosh->udp_started = true;
     if (cmosh_client_make_initial_packet(

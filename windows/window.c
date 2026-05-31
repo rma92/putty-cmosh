@@ -2194,6 +2194,13 @@ static void wm_size_resize_term(WinGuiSeat *wgs, LPARAM lParam)
     conf_set_int(wgs->conf, CONF_width, w);
 }
 
+static void mosh_request_redraw(WinGuiSeat *wgs)
+{
+    if (wgs->backend &&
+        conf_get_int(wgs->conf, CONF_protocol) == PROT_MOSH)
+        backend_special(wgs->backend, SS_NOP, 0);
+}
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                                 WPARAM wParam, LPARAM lParam)
 {
@@ -2545,9 +2552,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
             break;
           case IDM_RESET:
             term_pwron(wgs->term, true);
-            if (wgs->backend &&
-                conf_get_int(wgs->conf, CONF_protocol) == PROT_MOSH)
-                backend_special(wgs->backend, SS_NOP, 0);
+            mosh_request_redraw(wgs);
             if (wgs->ldisc)
                 ldisc_echoedit_update(wgs->ldisc);
             break;
@@ -3117,6 +3122,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                 reset_window(wgs, 0);
             }
         }
+        if (wParam == SIZE_MAXIMIZED ||
+            (wParam == SIZE_RESTORED && !wgs->resizing))
+            mosh_request_redraw(wgs);
         sys_cursor_update(wgs);
         return 0;
       case WM_DPICHANGED:

@@ -194,6 +194,7 @@ enum cmosh_client_recv_result cmosh_client_recv_packet(
 
     client->echo_timestamp = *timestamp;
     cmosh_input_note_ack(&client->input, ti->ack_num);
+    cmosh_input_note_ack(&client->input, ti->throwaway_num);
     return CMOSH_CLIENT_RECV_OK;
 }
 
