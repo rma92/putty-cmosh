@@ -1124,6 +1124,13 @@ void plug_closing_errno(Plug *plug, int error)
     plug_closing(plug, type, strerror(error));
 }
 
+static bool udp_transient_errno(int error)
+{
+    return error == EWOULDBLOCK || error == EAGAIN || error == ENOBUFS ||
+           error == ECONNREFUSED || error == ECONNRESET ||
+           error == EHOSTUNREACH || error == ENETUNREACH;
+}
+
 /*
  * Deal with socket errors detected in try_send().
  */
@@ -1241,7 +1248,7 @@ static size_t sk_net_write(Socket *sock, const void *buf, size_t len)
         int nsent = send(s->s, buf, len, MSG_NOSIGNAL);
         noise_ultralight(NOISE_SOURCE_IOLEN, nsent);
         if (nsent < 0) {
-            if (errno != EWOULDBLOCK) {
+            if (!udp_transient_errno(errno)) {
                 s->pending_error = errno;
                 uxsel_tell(s);
                 queue_toplevel_callback(socket_error_callback, s);
@@ -1436,6 +1443,8 @@ static void net_select_result(int fd, int event)
             if (errno == EWOULDBLOCK) {
                 break;
             }
+            if (s->datagram && udp_transient_errno(errno))
+                break;
         }
         if (ret < 0) {
             plug_closing_errno(s->plug, errno);

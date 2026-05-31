@@ -463,6 +463,13 @@ const char *winsock_error_string(int error)
     return win_strerror(error);
 }
 
+static bool udp_transient_winsock_error(DWORD err)
+{
+    return err == WSAEWOULDBLOCK || err == WSAENOBUFS ||
+           err == WSAECONNRESET || err == WSAENETRESET ||
+           err == WSAEHOSTUNREACH || err == WSAENETUNREACH;
+}
+
 static inline const char *namelookup_strerror(DWORD err)
 {
     /* PuTTY has traditionally translated a few of the likely error
@@ -938,6 +945,16 @@ static DWORD try_connect(NetSocket *sock)
     }
 
     SetHandleInformation((HANDLE)s, HANDLE_FLAG_INHERIT, 0);
+
+    if (sock->datagram && p_WSAIoctl) {
+#ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
+#endif
+        BOOL off = false;
+        DWORD bytes_returned;
+        p_WSAIoctl(s, SIO_UDP_CONNRESET, &off, sizeof(off), NULL, 0,
+                   &bytes_returned, NULL, NULL);
+    }
 
     if (sock->oobinline) {
         BOOL b = true;
@@ -1552,7 +1569,7 @@ static size_t sk_net_write(Socket *sock, const void *buf, size_t len)
         noise_ultralight(NOISE_SOURCE_IOLEN, nsent);
         if (nsent < 0) {
             DWORD err = p_WSAGetLastError();
-            if (err != WSAEWOULDBLOCK) {
+            if (!udp_transient_winsock_error(err)) {
                 s->pending_error = err;
                 queue_toplevel_callback(socket_error_callback, s);
             }
@@ -1634,6 +1651,8 @@ void select_result(WPARAM wParam, LPARAM lParam)
         return;                /* boggle */
 
     if ((err = WSAGETSELECTERROR(lParam)) != 0) {
+        if (s->datagram && udp_transient_winsock_error(err))
+            return;
         /*
          * An error has occurred on this socket. Pass it to the
          * plug.
@@ -1708,6 +1727,8 @@ void select_result(WPARAM wParam, LPARAM lParam)
             if (err == WSAEWOULDBLOCK) {
                 break;
             }
+            if (s->datagram && udp_transient_winsock_error(err))
+                break;
         }
         if (ret < 0) {
             plug_closing_winsock_error(s->plug, err);

@@ -4674,6 +4674,9 @@ void reset_terminal_menuitem(GtkMenuItem *item, gpointer data)
 {
     GtkFrontend *inst = (GtkFrontend *)data;
     term_pwron(inst->term, true);
+    if (inst->backend &&
+        conf_get_int(inst->conf, CONF_protocol) == PROT_MOSH)
+        backend_special(inst->backend, SS_NOP, 0);
     if (inst->ldisc)
         ldisc_echoedit_update(inst->ldisc);
 }

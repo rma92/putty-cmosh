@@ -189,18 +189,29 @@ static void mosh_send_idle(Mosh *mosh, unsigned long now)
     if (event.missing_state) {
         char msg[160];
         snprintf(msg, sizeof(msg),
-                 "mosh: waiting for missing server state current=%llu "
-                 "wanted=%llu\r\n",
+                 "Mosh waiting for missing server state current=%llu "
+                 "wanted=%llu",
                  (unsigned long long)event.gap_old_num,
                  (unsigned long long)event.gap_new_num);
-        seat_stderr(mosh->seat, msg, strlen(msg));
+        logevent(mosh->logctx, msg);
     }
     if (event.udp_timeout) {
-        const char msg[] =
-            "mosh: UDP timeout; no server packet received recently\r\n";
-        seat_stderr(mosh->seat, msg, sizeof(msg) - 1);
+        logevent(mosh->logctx,
+                 "Mosh UDP timeout; no server packet received recently");
     }
     if (packet_len)
+        mosh_udp_send(mosh, packet, packet_len);
+}
+
+static void mosh_send_ack(Mosh *mosh, unsigned long now)
+{
+    unsigned char packet[CMOSH_MAX_PACKET];
+    size_t packet_len = 0;
+
+    if (!mosh->udp_ready || mosh->shutdown)
+        return;
+    if (cmosh_client_make_ack(&mosh->client, mosh_now16(now), packet,
+                              sizeof(packet), &packet_len) == 0)
         mosh_udp_send(mosh, packet, packet_len);
 }
 
@@ -267,6 +278,7 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
             mosh_host_output(mosh, ti.diff, ti.diff_len);
         mosh->udp_ready = true;
         seat_notify_session_started(mosh->seat);
+        seat_update_specials_menu(mosh->seat);
         return;
     }
 
@@ -275,8 +287,11 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
                                     sizeof(diff), mosh_host_output, mosh,
                                     &event) == CMOSH_CLIENT_RECV_BAD_PACKET)
         return;
-    if (event.result == CMOSH_CLIENT_RECV_DUPLICATE)
+    if (event.result == CMOSH_CLIENT_RECV_DUPLICATE) {
+        cmosh_client_note_recv_time(&mosh->client, (uint64_t)GETTICKCOUNT());
+        mosh_send_ack(mosh, GETTICKCOUNT());
         return;
+    }
 
     cmosh_client_note_recv_time(&mosh->client, (uint64_t)GETTICKCOUNT());
 
@@ -288,10 +303,8 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
         return;
     }
 
-    if (event.should_ack &&
-        cmosh_client_make_ack(&mosh->client, mosh_now16(GETTICKCOUNT()),
-                              packet, sizeof(packet), &len) == 0)
-        mosh_udp_send(mosh, packet, len);
+    if (event.should_ack)
+        mosh_send_ack(mosh, GETTICKCOUNT());
 }
 
 static const PlugVtable Mosh_udp_plugvt = {
@@ -712,11 +725,19 @@ static void mosh_size(Backend *be, int width, int height)
 
 static void mosh_special(Backend *be, SessionSpecialCode code, int arg)
 {
+    Mosh *mosh = container_of(be, Mosh, backend);
+
+    if (code == SS_NOP && mosh->udp_ready)
+        mosh_size(be, (int)mosh->cols, (int)mosh->rows);
 }
 
 static const SessionSpecial *mosh_get_specials(Backend *be)
 {
-    return NULL;
+    static const SessionSpecial specials[] = {
+        {"Redraw screen", SS_NOP},
+        {NULL, SS_EXITMENU},
+    };
+    return specials;
 }
 
 static bool mosh_connected(Backend *be)

@@ -393,6 +393,11 @@ static void test_session(void)
     check(entry && entry->old_num == 2 && entry->new_num == 3 &&
               entry->diff[0] == 'b',
           "session queue pop second");
+    check(cmosh_server_queue_add(&queue, 2, 4,
+                                 (const unsigned char *)"bc", 2) == 0,
+          "session queue add overlapping stale");
+    check(cmosh_server_queue_pop_next(&queue, 3) == NULL,
+          "session queue ignores overlapping stale diff");
     check(cmosh_server_queue_waiting_for_gap(&queue, 3, &gap_old,
                                              &gap_new) &&
               gap_old == 4 && gap_new == 5,

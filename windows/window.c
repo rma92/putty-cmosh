@@ -2545,6 +2545,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
             break;
           case IDM_RESET:
             term_pwron(wgs->term, true);
+            if (wgs->backend &&
+                conf_get_int(wgs->conf, CONF_protocol) == PROT_MOSH)
+                backend_special(wgs->backend, SS_NOP, 0);
             if (wgs->ldisc)
                 ldisc_echoedit_update(wgs->ldisc);
             break;
