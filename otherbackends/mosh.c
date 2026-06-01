@@ -44,6 +44,7 @@ struct Mosh {
     bool remote_exited;
     bool shutdown;
     bool udp_target_ready;
+    bool logged_state_only_output;
 };
 
 static void mosh_free(Backend *be);
@@ -150,12 +151,19 @@ static unsigned int mosh_now16(unsigned long now)
     return (unsigned int)(now & 0xffffU);
 }
 
+struct mosh_output_ctx {
+    Mosh *mosh;
+    bool wrote;
+};
+
 static int mosh_seat_output(void *vctx, const unsigned char *data, size_t len)
 {
-    Mosh *mosh = (Mosh *)vctx;
+    struct mosh_output_ctx *ctx = (struct mosh_output_ctx *)vctx;
 
-    if (len)
-        seat_stdout(mosh->seat, data, len);
+    if (len) {
+        seat_stdout(ctx->mosh->seat, data, len);
+        ctx->wrote = true;
+    }
     return 0;
 }
 
@@ -163,11 +171,22 @@ static int mosh_host_output(void *vctx, const unsigned char *diff,
                             size_t diff_len)
 {
     Mosh *mosh = (Mosh *)vctx;
+    struct mosh_output_ctx ctx;
+    int ret;
 
     if (!diff_len)
         return 0;
-    return cmosh_decode_host_output_cb(diff, diff_len, mosh_seat_output,
-                                       mosh);
+    ctx.mosh = mosh;
+    ctx.wrote = false;
+    ret = cmosh_decode_host_output_cb(diff, diff_len, mosh_seat_output,
+                                      &ctx);
+    if (ret == 0 && !ctx.wrote && !mosh->logged_state_only_output) {
+        logevent(mosh->logctx,
+                 "Mosh server update contained no raw host-output bytes; "
+                 "full terminal-state renderer is required for this screen");
+        mosh->logged_state_only_output = true;
+    }
+    return ret;
 }
 
 static bool mosh_udp_send(Mosh *mosh, const unsigned char *packet,

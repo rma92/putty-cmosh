@@ -233,6 +233,12 @@ static void test_proto(void)
               buf, sizeof(buf), &n) == 0 &&
               n == 0,
           "ignore unknown host instruction bytes");
+    check(cmosh_decode_host_output(
+              (const unsigned char *)
+                  "\x0a\x0a\x12\x08\x2d\x01\x02\x03\x04\x22\x01Z",
+              12, buf, sizeof(buf), &n) == 0 &&
+              n == 1 && buf[0] == 'Z',
+          "skip unknown fixed-width host fields");
     {
         unsigned char top[9300], instruction[9200], hostbytes[9100];
         unsigned char data[9000];

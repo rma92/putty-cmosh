@@ -276,6 +276,35 @@ static int cmosh_host_output_copy(void *vctx, const unsigned char *data,
     return 0;
 }
 
+static int cmosh_pb_skip_field(const unsigned char *buf, size_t buflen,
+                               size_t *pos, unsigned int wire_type)
+{
+    uint64_t ignored, len;
+
+    switch (wire_type) {
+      case 0:
+        return cmosh_pb_get_varint(buf, buflen, pos, &ignored);
+      case 1:
+        if (buflen - *pos < 8)
+            return -1;
+        *pos += 8;
+        return 0;
+      case 2:
+        if (cmosh_pb_get_varint(buf, buflen, pos, &len) != 0 ||
+            len > buflen - *pos)
+            return -1;
+        *pos += (size_t)len;
+        return 0;
+      case 5:
+        if (buflen - *pos < 4)
+            return -1;
+        *pos += 4;
+        return 0;
+      default:
+        return -1;
+    }
+}
+
 static int decode_host_bytes(const unsigned char *buf, size_t buflen,
                              cmosh_host_output_fn output, void *ctx)
 {
@@ -298,12 +327,9 @@ static int decode_host_bytes(const unsigned char *buf, size_t buflen,
                     return -1;
             }
             pos += (size_t)len;
-        } else if (wire_type == 0) {
-            uint64_t ignored;
-            if (cmosh_pb_get_varint(buf, buflen, &pos, &ignored) != 0)
-                return -1;
         } else {
-            return -1;
+            if (cmosh_pb_skip_field(buf, buflen, &pos, wire_type) != 0)
+                return -1;
         }
     }
     return 0;
@@ -330,12 +356,9 @@ static int decode_host_instruction(const unsigned char *buf, size_t buflen,
                 decode_host_bytes(buf + pos, (size_t)len, output, ctx) != 0)
                 return -1;
             pos += (size_t)len;
-        } else if (wire_type == 0) {
-            uint64_t ignored;
-            if (cmosh_pb_get_varint(buf, buflen, &pos, &ignored) != 0)
-                return -1;
         } else {
-            return -1;
+            if (cmosh_pb_skip_field(buf, buflen, &pos, wire_type) != 0)
+                return -1;
         }
     }
     return 0;
@@ -366,12 +389,9 @@ int cmosh_decode_host_output_cb(const unsigned char *buf, size_t buflen,
                                         ctx) != 0)
                 return -1;
             pos += (size_t)len;
-        } else if (wire_type == 0) {
-            uint64_t ignored;
-            if (cmosh_pb_get_varint(buf, buflen, &pos, &ignored) != 0)
-                return -1;
         } else {
-            return 0;
+            if (cmosh_pb_skip_field(buf, buflen, &pos, wire_type) != 0)
+                return -1;
         }
     }
     return 0;

@@ -4,7 +4,7 @@
 
 Continue stabilizing native PuTTY Mosh and `cmosh`, with emphasis on UDP robustness, input retransmission correctness, terminal redraw behavior, and eventual replacement of raw host-output rendering with a real terminal-state model.
 
-Latest user feedback: maximize/restore now works. Lynx on emoji-heavy/forum pages can drive very high data usage and become unresponsive, likely from large unicode/full-screen updates causing decode/ACK failure loops.
+Latest user feedback: maximize/restore now works. Lynx on emoji-heavy/forum pages no longer crashes after large-output mitigation, and keystrokes keep working, but the problematic screen does not render until leaving that page. Normal SSH in PuTTY renders the same page.
 
 ## Files Recently Touched
 
@@ -33,6 +33,8 @@ Latest user feedback: maximize/restore now works. Lynx on emoji-heavy/forum page
 * Windows maximize/restore now uses the same terminal-resize predicate as ordinary WM_SIZE resize events: `RESIZE_TERM` or `RESIZE_EITHER` with Alt not pressed. Previously maximize/restore only called `wm_size_resize_term()` for `RESIZE_TERM`, so sessions using the default "resize either" behavior could redraw locally without sending the remote pty resize to Mosh/vim.
 * Host output decoding now has a callback/streaming API, so large unicode/full-screen server updates no longer have to fit in an 8 KiB temporary output buffer before being ACKed.
 * Server diffs can now be up to 64 KiB and out-of-order queued diffs are allocated dynamically, avoiding large inline `cmosh_client` structs while still tolerating larger compressed server updates.
+* Host protobuf decoding now skips unknown varint, length-delimited, fixed32, and fixed64 fields instead of dropping the whole server update. This avoids treating richer display/emoji-related fields as bad packets.
+* PuTTY Mosh logs a one-shot Event Log diagnostic if a server update decodes successfully but contains no raw host-output bytes, which is a strong signal that the current raw-output shim needs the real terminal-state renderer for that screen.
 
 ## Protocol Invariants
 
@@ -52,14 +54,17 @@ Latest user feedback: maximize/restore now works. Lynx on emoji-heavy/forum page
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after streaming host-output/dynamic server-diff changes.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed.
 * Latest `cmake --build build --target putty --config Debug` passed after streaming host-output/dynamic server-diff changes.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after protobuf unknown-field tolerance.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after protobuf unknown-field tolerance.
+* Latest `cmake --build build --target putty --config Debug` compiled but failed to relink because `build\Debug\putty.exe` was open/locked: `LNK1168: cannot open ... putty.exe for writing`.
 
 ## Known Issues
 
 * Full terminal correctness is not complete; output still depends on raw host-output decoding instead of a full Mosh terminal-state model.
 * High-latency or lossy links may still show repeated characters; throwaway handling and resize retransmission are only mitigations.
 * Sleep/wake and interface changes may still need deeper UDP reopen or retransmission timer work.
-* Lynx/emoji-heavy pages need user retesting with `build\Debug\putty.exe` after the large-output ACK-loop mitigation.
+* Lynx/emoji-heavy pages need user retesting with `build\Debug\putty.exe` after rebuilding once the currently running PuTTY is closed.
 
 ## Exact Next Step
 
-Test `.\build\Debug\putty.exe` with Lynx on the emoji-heavy/forum page that previously hung. If it still spins, add short diagnostics for bad packet/decode failures and ACK advancement in `mosh_udp_receive()`/`cmosh_client_process_packet()`, then continue toward the real terminal-state model and lossy-link retransmission fixes.
+Close any running `build\Debug\putty.exe`, rerun `cmake --build build --target putty --config Debug`, then test Lynx on the emoji-heavy/forum page. Check the PuTTY Event Log for the new "no raw host-output bytes" diagnostic; if it appears, prioritize implementing the real Mosh terminal-state renderer over further raw-output fixes.
