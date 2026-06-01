@@ -150,21 +150,24 @@ static unsigned int mosh_now16(unsigned long now)
     return (unsigned int)(now & 0xffffU);
 }
 
+static int mosh_seat_output(void *vctx, const unsigned char *data, size_t len)
+{
+    Mosh *mosh = (Mosh *)vctx;
+
+    if (len)
+        seat_stdout(mosh->seat, data, len);
+    return 0;
+}
+
 static int mosh_host_output(void *vctx, const unsigned char *diff,
                             size_t diff_len)
 {
     Mosh *mosh = (Mosh *)vctx;
-    unsigned char host_output[8192];
-    size_t out_len = 0;
 
     if (!diff_len)
         return 0;
-    if (cmosh_decode_host_output(diff, diff_len, host_output,
-                                 sizeof(host_output), &out_len) != 0)
-        return -1;
-    if (out_len)
-        seat_stdout(mosh->seat, host_output, out_len);
-    return 0;
+    return cmosh_decode_host_output_cb(diff, diff_len, mosh_seat_output,
+                                       mosh);
 }
 
 static bool mosh_udp_send(Mosh *mosh, const unsigned char *packet,
@@ -253,7 +256,7 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
                              size_t len)
 {
     Mosh *mosh = container_of(plug, Mosh, udp_plug);
-    unsigned char packet[CMOSH_MAX_PACKET], diff[8192];
+    unsigned char packet[CMOSH_MAX_PACKET], diff[CMOSH_SERVER_DIFF_MAX];
     struct cmosh_transport_instruction ti;
     struct cmosh_client_recv_event event;
     unsigned int timestamp = 0, echo_timestamp = 0;
@@ -713,6 +716,7 @@ static void mosh_free(Backend *be)
     expire_timer_context(mosh);
     if (mosh->udp_socket)
         sk_close(mosh->udp_socket);
+    cmosh_server_queue_clear(&mosh->client.server_queue);
     if (mosh->ssh_backend)
         backend_free(mosh->ssh_backend);
     if (mosh->bootstrap_output)

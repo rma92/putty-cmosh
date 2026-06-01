@@ -9,7 +9,7 @@
 #define CMOSH_INPUT_MAX_RECORDS 128
 #define CMOSH_INPUT_MAX_BYTES 4096
 #define CMOSH_SERVER_QUEUE 16
-#define CMOSH_SERVER_DIFF_MAX 8192
+#define CMOSH_SERVER_DIFF_MAX 65536
 
 struct cmosh_input_record {
     uint64_t state;
@@ -34,7 +34,7 @@ struct cmosh_server_diff {
     uint64_t old_num;
     uint64_t new_num;
     size_t len;
-    unsigned char diff[CMOSH_SERVER_DIFF_MAX];
+    unsigned char *diff;
 };
 
 struct cmosh_server_queue {
@@ -57,6 +57,7 @@ int cmosh_input_record_diff(struct cmosh_input_state *st,
                             size_t *diff_len);
 
 void cmosh_server_queue_init(struct cmosh_server_queue *queue);
+void cmosh_server_queue_clear(struct cmosh_server_queue *queue);
 int cmosh_server_queue_add(struct cmosh_server_queue *queue, uint64_t old_num,
                            uint64_t new_num, const unsigned char *diff,
                            size_t diff_len);

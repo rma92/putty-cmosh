@@ -1,5 +1,6 @@
 #include "cmosh_client.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 void cmosh_client_init(struct cmosh_client *client,
@@ -296,6 +297,8 @@ int cmosh_client_apply_server_diffs(struct cmosh_client *client,
         if (output(ctx, entry->diff, entry->len) != 0)
             return -1;
         client->server_state = entry->new_num;
+        free(entry->diff);
+        entry->diff = NULL;
         entry->used = 0;
     }
     return 0;

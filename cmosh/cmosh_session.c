@@ -2,6 +2,7 @@
 
 #include "cmosh_proto.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 void cmosh_input_init(struct cmosh_input_state *st, uint64_t initial_state)
@@ -134,6 +135,24 @@ void cmosh_server_queue_init(struct cmosh_server_queue *queue)
     memset(queue, 0, sizeof(*queue));
 }
 
+static void cmosh_server_diff_clear(struct cmosh_server_diff *entry)
+{
+    if (!entry)
+        return;
+    free(entry->diff);
+    memset(entry, 0, sizeof(*entry));
+}
+
+void cmosh_server_queue_clear(struct cmosh_server_queue *queue)
+{
+    size_t i;
+
+    if (!queue)
+        return;
+    for (i = 0; i < CMOSH_SERVER_QUEUE; i++)
+        cmosh_server_diff_clear(&queue->entries[i]);
+}
+
 int cmosh_server_queue_add(struct cmosh_server_queue *queue, uint64_t old_num,
                            uint64_t new_num, const unsigned char *diff,
                            size_t diff_len)
@@ -160,12 +179,19 @@ int cmosh_server_queue_add(struct cmosh_server_queue *queue, uint64_t old_num,
     if (slot == CMOSH_SERVER_QUEUE)
         return -1;
 
+    cmosh_server_diff_clear(&queue->entries[slot]);
     queue->entries[slot].used = 1;
     queue->entries[slot].old_num = old_num;
     queue->entries[slot].new_num = new_num;
     queue->entries[slot].len = diff_len;
-    if (diff_len)
+    if (diff_len) {
+        queue->entries[slot].diff = malloc(diff_len);
+        if (!queue->entries[slot].diff) {
+            cmosh_server_diff_clear(&queue->entries[slot]);
+            return -1;
+        }
         memcpy(queue->entries[slot].diff, diff, diff_len);
+    }
     return 0;
 }
 

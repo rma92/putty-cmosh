@@ -3,6 +3,7 @@
 #include "cmosh_fragment.h"
 #include "cmosh_ocb.h"
 #include "cmosh_proto.h"
+#include "cmosh_session.h"
 
 #include <string.h>
 
@@ -96,7 +97,8 @@ int cmosh_transport_decode_packet(
     unsigned char *diff_buf, size_t diff_buf_len, unsigned int *timestamp,
     unsigned int *echo_timestamp, uint64_t *seq)
 {
-    unsigned char plain[CMOSH_MAX_PACKET], decompressed[8192];
+    unsigned char plain[CMOSH_MAX_PACKET];
+    unsigned char decompressed[CMOSH_SERVER_DIFF_MAX + 1024];
     size_t plain_len, decompressed_len;
     struct cmosh_fragment frag;
 

@@ -24,6 +24,9 @@ struct cmosh_transport_instruction {
     size_t chaff_len;
 };
 
+typedef int (*cmosh_host_output_fn)(void *ctx, const unsigned char *data,
+                                    size_t len);
+
 size_t cmosh_pb_varint_size(uint64_t value);
 int cmosh_pb_put_varint(unsigned char *buf, size_t buflen, size_t *pos,
                         uint64_t value);
@@ -48,5 +51,7 @@ int cmosh_encode_user_keystroke_message(const unsigned char *keys,
 int cmosh_decode_host_output(const unsigned char *buf, size_t buflen,
                              unsigned char *out, size_t outlen,
                              size_t *written);
+int cmosh_decode_host_output_cb(const unsigned char *buf, size_t buflen,
+                                cmosh_host_output_fn output, void *ctx);
 
 #endif

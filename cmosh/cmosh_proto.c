@@ -256,9 +256,28 @@ int cmosh_encode_user_keystroke_message(const unsigned char *keys,
     return 0;
 }
 
+struct cmosh_host_output_copy_ctx {
+    unsigned char *out;
+    size_t outlen;
+    size_t written;
+};
+
+static int cmosh_host_output_copy(void *vctx, const unsigned char *data,
+                                  size_t len)
+{
+    struct cmosh_host_output_copy_ctx *ctx =
+        (struct cmosh_host_output_copy_ctx *)vctx;
+
+    if (ctx->written + len > ctx->outlen)
+        return -1;
+    if (len)
+        memcpy(ctx->out + ctx->written, data, len);
+    ctx->written += len;
+    return 0;
+}
+
 static int decode_host_bytes(const unsigned char *buf, size_t buflen,
-                             unsigned char *out, size_t outlen,
-                             size_t *written)
+                             cmosh_host_output_fn output, void *ctx)
 {
     size_t pos = 0;
 
@@ -275,10 +294,8 @@ static int decode_host_bytes(const unsigned char *buf, size_t buflen,
                 len > buflen - pos)
                 return -1;
             if (field == 4) {
-                if (*written + (size_t)len > outlen)
+                if (output(ctx, buf + pos, (size_t)len) != 0)
                     return -1;
-                memcpy(out + *written, buf + pos, (size_t)len);
-                *written += (size_t)len;
             }
             pos += (size_t)len;
         } else if (wire_type == 0) {
@@ -293,8 +310,7 @@ static int decode_host_bytes(const unsigned char *buf, size_t buflen,
 }
 
 static int decode_host_instruction(const unsigned char *buf, size_t buflen,
-                                   unsigned char *out, size_t outlen,
-                                   size_t *written)
+                                   cmosh_host_output_fn output, void *ctx)
 {
     size_t pos = 0;
 
@@ -311,8 +327,7 @@ static int decode_host_instruction(const unsigned char *buf, size_t buflen,
                 len > buflen - pos)
                 return -1;
             if (field == 2 &&
-                decode_host_bytes(buf + pos, (size_t)len, out, outlen,
-                                  written) != 0)
+                decode_host_bytes(buf + pos, (size_t)len, output, ctx) != 0)
                 return -1;
             pos += (size_t)len;
         } else if (wire_type == 0) {
@@ -326,15 +341,13 @@ static int decode_host_instruction(const unsigned char *buf, size_t buflen,
     return 0;
 }
 
-int cmosh_decode_host_output(const unsigned char *buf, size_t buflen,
-                             unsigned char *out, size_t outlen,
-                             size_t *written)
+int cmosh_decode_host_output_cb(const unsigned char *buf, size_t buflen,
+                                cmosh_host_output_fn output, void *ctx)
 {
     size_t pos = 0;
 
-    if (!buf || !out || !written)
+    if (!buf || !output)
         return -1;
-    *written = 0;
 
     while (pos < buflen) {
         uint64_t key, len;
@@ -349,8 +362,8 @@ int cmosh_decode_host_output(const unsigned char *buf, size_t buflen,
                 len > buflen - pos)
                 return -1;
             if (field == 1 &&
-                decode_host_instruction(buf + pos, (size_t)len, out, outlen,
-                                        written) != 0)
+                decode_host_instruction(buf + pos, (size_t)len, output,
+                                        ctx) != 0)
                 return -1;
             pos += (size_t)len;
         } else if (wire_type == 0) {
@@ -362,4 +375,22 @@ int cmosh_decode_host_output(const unsigned char *buf, size_t buflen,
         }
     }
     return 0;
+}
+
+int cmosh_decode_host_output(const unsigned char *buf, size_t buflen,
+                             unsigned char *out, size_t outlen,
+                             size_t *written)
+{
+    struct cmosh_host_output_copy_ctx ctx;
+    int ret;
+
+    if (!out || !written)
+        return -1;
+    ctx.out = out;
+    ctx.outlen = outlen;
+    ctx.written = 0;
+    ret = cmosh_decode_host_output_cb(buf, buflen, cmosh_host_output_copy,
+                                      &ctx);
+    *written = ctx.written;
+    return ret;
 }

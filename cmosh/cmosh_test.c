@@ -21,6 +21,15 @@ static void check(int cond, const char *name)
     }
 }
 
+static int count_host_output(void *vctx, const unsigned char *data, size_t len)
+{
+    size_t *count = (size_t *)vctx;
+
+    (void)data;
+    *count += len;
+    return 0;
+}
+
 static int hexval(char c)
 {
     if (c >= '0' && c <= '9')
@@ -224,6 +233,42 @@ static void test_proto(void)
               buf, sizeof(buf), &n) == 0 &&
               n == 0,
           "ignore unknown host instruction bytes");
+    {
+        unsigned char top[9300], instruction[9200], hostbytes[9100];
+        unsigned char data[9000];
+        size_t hpos = 0, ipos = 0, tpos = 0, total = 0;
+
+        memset(data, 'x', sizeof(data));
+        check(cmosh_pb_put_varint(hostbytes, sizeof(hostbytes), &hpos,
+                                  (4U << 3) | 2) == 0,
+              "encode large host bytes key");
+        check(cmosh_pb_put_varint(hostbytes, sizeof(hostbytes), &hpos,
+                                  sizeof(data)) == 0,
+              "encode large host bytes length");
+        memcpy(hostbytes + hpos, data, sizeof(data));
+        hpos += sizeof(data);
+        check(cmosh_pb_put_varint(instruction, sizeof(instruction), &ipos,
+                                  (2U << 3) | 2) == 0,
+              "encode large host instruction key");
+        check(cmosh_pb_put_varint(instruction, sizeof(instruction), &ipos,
+                                  hpos) == 0,
+              "encode large host instruction length");
+        memcpy(instruction + ipos, hostbytes, hpos);
+        ipos += hpos;
+        check(cmosh_pb_put_varint(top, sizeof(top), &tpos,
+                                  (1U << 3) | 2) == 0,
+              "encode large host top-level key");
+        check(cmosh_pb_put_varint(top, sizeof(top), &tpos, ipos) == 0,
+              "encode large host top-level length");
+        memcpy(top + tpos, instruction, ipos);
+        tpos += ipos;
+        check(cmosh_decode_host_output(top, tpos, buf, 32, &n) != 0,
+              "large host output does not fit fixed buffer");
+        check(cmosh_decode_host_output_cb(top, tpos, count_host_output,
+                                          &total) == 0 &&
+                  total == sizeof(data),
+              "large host output streams through callback");
+    }
     check(cmosh_encode_user_keystroke_message((const unsigned char *)"x", 1,
                                               buf, sizeof(buf), &n) == 0 &&
               n == 7 && memcmp(buf, "\x0a\x05\x12\x03\x22\x01", 6) == 0 &&
