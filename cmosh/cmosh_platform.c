@@ -737,11 +737,22 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                     seq = event.seq;
                                     if (event.result ==
                                         CMOSH_CLIENT_RECV_DUPLICATE) {
+                                        cmosh_client_note_recv_time(
+                                            &client, cmosh_now_ms());
                                         if (verbose)
                                             fprintf(stderr,
                                                     "cmosh: ignored duplicate "
                                                     "server packet seq=%llu\n",
                                                     (unsigned long long)seq);
+                                        if (cmosh_client_make_ack(
+                                                &client, cmosh_now16_ms(),
+                                                packet, sizeof(packet),
+                                                &packet_len) != 0)
+                                            goto out_socket;
+                                        if (send(s, (const char *)packet,
+                                                 (int)packet_len, 0) ==
+                                            SOCKET_ERROR)
+                                            goto out_socket;
                                         continue;
                                     }
                                     if (event.result ==
@@ -832,10 +843,11 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                 (CMOSH_CLIENT_UDP_TIMEOUT_DIAG_MS /
                                                  1000U));
                                 }
-                                if (send(s, (const char *)packet,
+                                if (packet_len &&
+                                    send(s, (const char *)packet,
                                          (int)packet_len, 0) == SOCKET_ERROR)
                                     goto out_socket;
-                                if (verbose) {
+                                if (packet_len && verbose) {
                                     fprintf(stderr,
                                             "cmosh: sent keepalive ack=%llu "
                                             "client state=%llu retry=%u\n",

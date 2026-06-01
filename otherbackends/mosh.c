@@ -799,7 +799,11 @@ static void mosh_send(Backend *be, const char *buf, size_t len)
 
 static size_t mosh_sendbuffer(Backend *be)
 {
-    return 0;
+    Mosh *mosh = container_of(be, Mosh, backend);
+
+    if (!mosh->udp_ready || mosh->shutdown)
+        return 0;
+    return mosh->client.input.bytes_len;
 }
 
 static void mosh_size(Backend *be, int width, int height)
@@ -854,7 +858,10 @@ static int mosh_exitcode(Backend *be)
 static bool mosh_sendok(Backend *be)
 {
     Mosh *mosh = container_of(be, Mosh, backend);
-    return mosh->udp_ready && !mosh->shutdown;
+
+    return mosh->udp_ready && !mosh->shutdown &&
+           mosh->client.input.nrecords < CMOSH_INPUT_MAX_RECORDS &&
+           mosh->client.input.bytes_len < CMOSH_INPUT_MAX_BYTES;
 }
 
 static bool mosh_ldisc_option_state(Backend *be, int option)

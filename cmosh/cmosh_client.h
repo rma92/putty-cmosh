@@ -10,6 +10,7 @@
 
 #define CMOSH_CLIENT_MISSING_STATE_DIAG_MS 5000U
 #define CMOSH_CLIENT_UDP_TIMEOUT_DIAG_MS 30000U
+#define CMOSH_CLIENT_IDLE_KEEPALIVE_MS 1000U
 #define CMOSH_CLIENT_SERVER_SHUTDOWN_STATE UINT64_MAX
 #define CMOSH_CLIENT_INPUT_CHUNK_MAX 480U
 
@@ -18,6 +19,7 @@ struct cmosh_client {
     uint64_t send_seq;
     uint64_t server_state;
     uint64_t last_recv_ms;
+    uint64_t last_idle_sent_ms;
     uint64_t last_missing_diag_ms;
     uint64_t last_timeout_diag_ms;
     unsigned int echo_timestamp;

@@ -3,6 +3,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int cmosh_client_input_has_room(const struct cmosh_client *client,
+                                       size_t len)
+{
+    if (!client || !len ||
+        client->input.nrecords >= CMOSH_INPUT_MAX_RECORDS ||
+        len > sizeof(client->input.bytes) - client->input.bytes_len)
+        return 0;
+    return 1;
+}
+
 void cmosh_client_init(struct cmosh_client *client,
                        const unsigned char key[16],
                        uint64_t initial_client_ack,
@@ -15,6 +25,7 @@ void cmosh_client_init(struct cmosh_client *client,
     memcpy(client->key, key, sizeof(client->key));
     client->send_seq = next_send_seq;
     client->server_state = initial_server_state;
+    client->last_idle_sent_ms = UINT64_MAX;
     client->echo_timestamp = initial_echo_timestamp;
     cmosh_input_init(&client->input, initial_client_ack);
     cmosh_transport_init(&client->recv_transport);
@@ -56,12 +67,17 @@ int cmosh_client_make_ack(struct cmosh_client *client, unsigned int now16,
                           unsigned char *packet, size_t packet_cap,
                           size_t *packet_len)
 {
+    int ret;
+
     if (!client)
         return -1;
-    return cmosh_transport_make_packet(
-        client->key, client->send_seq++, client->input.acked,
+    ret = cmosh_transport_make_packet(
+        client->key, client->send_seq, client->input.acked,
         client->input.acked, client->server_state, NULL, 0, now16,
         client->echo_timestamp, packet, packet_cap, packet_len);
+    if (ret == 0)
+        client->send_seq++;
+    return ret;
 }
 
 int cmosh_client_make_resize(struct cmosh_client *client, unsigned int cols,
@@ -72,19 +88,26 @@ int cmosh_client_make_resize(struct cmosh_client *client, unsigned int cols,
     unsigned char diff[64];
     size_t diff_len;
     uint64_t old_client_state;
+    int ret;
 
     if (!client)
         return -1;
     if (cmosh_encode_user_resize_message(cols, rows, diff, sizeof(diff),
                                          &diff_len) != 0)
         return -1;
+    if (!cmosh_client_input_has_room(client, diff_len))
+        return -1;
+    old_client_state = client->input.current;
+    ret = cmosh_transport_make_packet(
+        client->key, client->send_seq, old_client_state,
+        client->input.current + 1, client->server_state, diff, diff_len, now16,
+        client->echo_timestamp, packet, packet_cap, packet_len);
+    if (ret != 0)
+        return ret;
     if (cmosh_input_append_diff(&client->input, diff, diff_len, now_ms) != 0)
         return -1;
-    old_client_state = client->input.current - 1;
-    return cmosh_transport_make_packet(
-        client->key, client->send_seq++, old_client_state,
-        client->input.current, client->server_state, diff, diff_len, now16,
-        client->echo_timestamp, packet, packet_cap, packet_len);
+    client->send_seq++;
+    return 0;
 }
 
 int cmosh_client_make_input(struct cmosh_client *client,
@@ -96,19 +119,27 @@ int cmosh_client_make_input(struct cmosh_client *client,
     unsigned char diff[1024];
     size_t diff_len;
     uint64_t old_client_state;
+    int ret;
 
     if (!client || !keys || !keys_len ||
         keys_len > CMOSH_CLIENT_INPUT_CHUNK_MAX)
         return -1;
     if (cmosh_encode_user_keystroke_message(keys, keys_len, diff,
-                                            sizeof(diff), &diff_len) != 0 ||
-        cmosh_input_append(&client->input, keys, keys_len, now_ms) != 0)
+                                            sizeof(diff), &diff_len) != 0)
         return -1;
-    old_client_state = client->input.current - 1;
-    return cmosh_transport_make_packet(
-        client->key, client->send_seq++, old_client_state,
-        client->input.current, client->server_state, diff, diff_len, now16,
+    if (!cmosh_client_input_has_room(client, keys_len))
+        return -1;
+    old_client_state = client->input.current;
+    ret = cmosh_transport_make_packet(
+        client->key, client->send_seq, old_client_state,
+        client->input.current + 1, client->server_state, diff, diff_len, now16,
         client->echo_timestamp, packet, packet_cap, packet_len);
+    if (ret != 0)
+        return ret;
+    if (cmosh_input_append(&client->input, keys, keys_len, now_ms) != 0)
+        return -1;
+    client->send_seq++;
+    return 0;
 }
 
 int cmosh_client_make_idle(struct cmosh_client *client, uint64_t now_ms,
@@ -121,6 +152,7 @@ int cmosh_client_make_idle(struct cmosh_client *client, uint64_t now_ms,
     size_t diff_len = 0;
     uint64_t old_client_state, new_client_state;
     struct cmosh_input_record *retry;
+    int ret;
 
     if (!client)
         return -1;
@@ -131,8 +163,6 @@ int cmosh_client_make_idle(struct cmosh_client *client, uint64_t now_ms,
             return -1;
         old_client_state = retry->state - 1;
         new_client_state = retry->state;
-        retry->last_sent_ms = now_ms;
-        retry->send_count++;
         diff_ptr = diff;
         if (retransmitted)
             *retransmitted = 1;
@@ -143,10 +173,17 @@ int cmosh_client_make_idle(struct cmosh_client *client, uint64_t now_ms,
             *retransmitted = 0;
     }
 
-    return cmosh_transport_make_packet(
-        client->key, client->send_seq++, old_client_state, new_client_state,
+    ret = cmosh_transport_make_packet(
+        client->key, client->send_seq, old_client_state, new_client_state,
         client->server_state, diff_ptr, diff_len, now16,
         client->echo_timestamp, packet, packet_cap, packet_len);
+    if (ret == 0 && retry) {
+        retry->last_sent_ms = now_ms;
+        retry->send_count++;
+    }
+    if (ret == 0)
+        client->send_seq++;
+    return ret;
 }
 
 int cmosh_client_make_idle_event(struct cmosh_client *client, uint64_t now_ms,
@@ -155,24 +192,35 @@ int cmosh_client_make_idle_event(struct cmosh_client *client, uint64_t now_ms,
                                  struct cmosh_client_idle_event *event)
 {
     int retransmitted = 0;
+    int missing_state, udp_timeout;
+    struct cmosh_input_record *retry;
 
     if (event)
         memset(event, 0, sizeof(*event));
+    if (packet_len)
+        *packet_len = 0;
     if (!client)
         return -1;
 
+    missing_state = cmosh_client_missing_state_diag_due(
+        client, now_ms, event ? &event->gap_old_num : NULL,
+        event ? &event->gap_new_num : NULL);
+    udp_timeout = cmosh_client_udp_timeout_due(client, now_ms);
     if (event) {
-        event->missing_state = cmosh_client_missing_state_diag_due(
-            client, now_ms, &event->gap_old_num, &event->gap_new_num);
-        event->udp_timeout = cmosh_client_udp_timeout_due(client, now_ms);
-    } else {
-        (void)cmosh_client_missing_state_diag_due(client, now_ms, NULL, NULL);
-        (void)cmosh_client_udp_timeout_due(client, now_ms);
+        event->missing_state = missing_state;
+        event->udp_timeout = udp_timeout;
     }
+
+    retry = cmosh_input_retransmit_record(&client->input, now_ms);
+    if (!retry && !missing_state && !udp_timeout &&
+        client->last_idle_sent_ms != UINT64_MAX &&
+        now_ms - client->last_idle_sent_ms < CMOSH_CLIENT_IDLE_KEEPALIVE_MS)
+        return 0;
 
     if (cmosh_client_make_idle(client, now_ms, now16, packet, packet_cap,
                                packet_len, &retransmitted) != 0)
         return -1;
+    client->last_idle_sent_ms = now_ms;
     if (event)
         event->retransmitted = retransmitted;
     return 0;

@@ -41,10 +41,15 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Fragment reassembly is held in `cmosh_transport_state`; `cmosh_client_recv_packet` now returns `CMOSH_CLIENT_RECV_PENDING` while waiting for remaining fragments and does not ACK a server state until the full instruction is decoded/applied.
 * Fragment assembly is now cleared if a malformed/conflicting fragment arrives or if a complete single-fragment packet arrives while an old partial assembly is pending. This avoids stale fragment state poisoning later receives.
 * `cmosh_client_make_input` now validates/encodes input before appending it to the retransmission queue, and rejects chunks larger than `CMOSH_CLIENT_INPUT_CHUNK_MAX`. PuTTY Mosh splits larger backend sends into protocol-sized input packets.
+* Empty idle keepalives are now rate-limited to `CMOSH_CLIENT_IDLE_KEEPALIVE_MS` (1s). Retransmits, missing-state diagnostics, and UDP-timeout probes still force an idle packet.
+* Client packet constructors avoid mutating send sequence or input retransmission records until packet encoding succeeds. This keeps failed ACK/input/resize/idle packet construction from drifting client state.
+* Standalone `cmosh` now ACKs duplicate server packets, matching the PuTTY backend and helping the server recover if our previous ACK was lost.
+* PuTTY Mosh `sendbuffer()` and `sendok()` now reflect the cmosh input retransmission queue so paste bursts and lossy links get backend backpressure instead of reporting an empty send buffer while input states are pending.
 
 ## Protocol Invariants
 
 * Do not retransmit input already acknowledged or thrown away by the server.
+* Do not advance local send sequence, input state, or retransmit timestamps for a packet that was not successfully encoded for sending.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
 * Do not trust network input; validate packet lengths and state transitions before use.
 * Preserve behavior of non-Mosh PuTTY backends.
@@ -72,6 +77,9 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after fragment-state cleanup and input chunk hardening.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after fragment-state cleanup and input chunk hardening.
 * Latest `cmake --build build --target putty --config Debug` passed after fragment-state cleanup and input chunk hardening.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after idle/backpressure/non-mutating packet-constructor hardening.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after idle/backpressure/non-mutating packet-constructor hardening.
+* Latest `cmake --build build --target putty --config Debug` passed after idle/backpressure/non-mutating packet-constructor hardening.
 
 ## Known Issues
 
@@ -82,4 +90,4 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 
 ## Exact Next Step
 
-Retest with `build\Debug\putty.exe` on a high-latency/lossy connection, especially paste bursts and rapid command-history navigation immediately after login. If repeated characters persist, inspect the server ACK/throwaway progression and retransmission timing next.
+Retest with `build\Debug\putty.exe` on a high-latency/lossy connection, especially paste bursts, sleep/wake, and rapid command-history navigation immediately after login. If repeated characters persist, add throttled diagnostics for server `ack_num`/`throwaway_num`, queued input state numbers, and retransmit state numbers.

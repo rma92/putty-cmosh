@@ -686,6 +686,13 @@ static void test_client(void)
                                 &n) == 0 &&
               client.send_seq == 4,
           "client make ack");
+    {
+        uint64_t send_seq = client.send_seq;
+
+        check(cmosh_client_make_ack(&client, 0x2223, packet, 1, &n) != 0 &&
+                  client.send_seq == send_seq,
+              "client failed ack does not advance send seq");
+    }
     memset(&ti, 0, sizeof(ti));
     check(cmosh_transport_decode_packet(key, packet, n, &ti, diff,
                                         sizeof(diff), &timestamp, &timestamp,
@@ -700,6 +707,20 @@ static void test_client(void)
                                   &n) == 0 &&
               client.input.current == 11 && client.send_seq == 5,
           "client make input");
+    {
+        uint64_t current = client.input.current;
+        uint64_t send_seq = client.send_seq;
+        size_t nrecords = client.input.nrecords;
+        size_t bytes_len = client.input.bytes_len;
+
+        check(cmosh_client_make_input(&client, (const unsigned char *)"y",
+                                      1, 101, 0x3334, packet, 1, &n) != 0 &&
+                  client.input.current == current &&
+                  client.send_seq == send_seq &&
+                  client.input.nrecords == nrecords &&
+                  client.input.bytes_len == bytes_len,
+              "client failed input packet does not advance state");
+    }
     {
         unsigned char bigkeys[CMOSH_CLIENT_INPUT_CHUNK_MAX + 1];
         uint64_t current = client.input.current;
@@ -891,6 +912,31 @@ static void test_client(void)
               !idle_event.retransmitted && idle_event.gap_old_num == 8 &&
               idle_event.gap_new_num == 9,
               "client idle event diagnostics");
+    }
+
+    cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 30,
+                      0, 7);
+    {
+        struct cmosh_client_idle_event idle_event;
+        uint64_t send_seq;
+
+        check(cmosh_client_make_idle_event(&client, 1000, 0x7000, packet,
+                                           sizeof(packet), &n,
+                                           &idle_event) == 0 &&
+                  n != 0 && !idle_event.retransmitted,
+              "client first idle keepalive sends");
+        send_seq = client.send_seq;
+        check(cmosh_client_make_idle_event(
+                  &client, 1000 + CMOSH_CLIENT_IDLE_KEEPALIVE_MS - 1,
+                  0x7001, packet, sizeof(packet), &n, &idle_event) == 0 &&
+                  n == 0 && client.send_seq == send_seq &&
+                  !idle_event.retransmitted,
+              "client idle keepalive is rate limited");
+        check(cmosh_client_make_idle_event(
+                  &client, 1000 + CMOSH_CLIENT_IDLE_KEEPALIVE_MS,
+                  0x7002, packet, sizeof(packet), &n, &idle_event) == 0 &&
+                  n != 0 && client.send_seq == send_seq + 1,
+              "client idle keepalive sends when due");
     }
 }
 
