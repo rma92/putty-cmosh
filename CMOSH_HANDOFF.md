@@ -4,7 +4,7 @@
 
 Continue stabilizing native PuTTY Mosh and `cmosh`, with emphasis on UDP robustness, input retransmission correctness, terminal redraw behavior, and eventual replacement of raw host-output rendering with a real terminal-state model.
 
-Latest user feedback: maximize/restore now works. Lynx on emoji-heavy/forum pages no longer crashes after large-output mitigation, and keystrokes keep working, but the problematic screen does not render until leaving that page. Normal SSH in PuTTY renders the same page.
+Latest user feedback: maximize/restore now works. Lynx on emoji-heavy/forum pages no longer crashes after large-output mitigation, and keystrokes keep working, but the problematic screen does not render until leaving that page. Normal SSH in PuTTY renders the same page. User also reports that sometimes pressing Up for shell history just after login moves the cursor up a line.
 
 ## Files Recently Touched
 
@@ -35,6 +35,8 @@ Latest user feedback: maximize/restore now works. Lynx on emoji-heavy/forum page
 * Server diffs can now be up to 64 KiB and out-of-order queued diffs are allocated dynamically, avoiding large inline `cmosh_client` structs while still tolerating larger compressed server updates.
 * Host protobuf decoding now skips unknown varint, length-delimited, fixed32, and fixed64 fields instead of dropping the whole server update. This avoids treating richer display/emoji-related fields as bad packets.
 * PuTTY Mosh logs a one-shot Event Log diagnostic if a server update decodes successfully but contains no raw host-output bytes, which is a strong signal that the current raw-output shim needs the real terminal-state renderer for that screen.
+* Upstream `hostinput.proto` confirms server diffs are still `HostMessage.instruction = 1`, extension `HostBytes = 2`, `hoststring = 4`; the Lynx emoji freeze is more likely PuTTY interpreting UTF-8 emoji bytes as 8-bit C1 terminal controls than a missing protobuf display message.
+* Windows PuTTY now sets `CONF_line_codepage` to `UTF-8` by default for Mosh sessions before fonts and terminal unicode tables are initialised, but only if the user did not explicitly configure a line codepage.
 
 ## Protocol Invariants
 
@@ -57,6 +59,9 @@ Latest user feedback: maximize/restore now works. Lynx on emoji-heavy/forum page
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after protobuf unknown-field tolerance.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after protobuf unknown-field tolerance.
 * Latest `cmake --build build --target putty --config Debug` compiled but failed to relink because `build\Debug\putty.exe` was open/locked: `LNK1168: cannot open ... putty.exe for writing`.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after the Windows Mosh UTF-8 default change.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after the Windows Mosh UTF-8 default change.
+* Latest `cmake --build build --target putty --config Debug` compiled after the Windows Mosh UTF-8 default change, but failed to relink because `build\Debug\putty.exe` was open/locked: `LNK1168: cannot open ... putty.exe for writing`.
 
 ## Known Issues
 
@@ -64,7 +69,8 @@ Latest user feedback: maximize/restore now works. Lynx on emoji-heavy/forum page
 * High-latency or lossy links may still show repeated characters; throwaway handling and resize retransmission are only mitigations.
 * Sleep/wake and interface changes may still need deeper UDP reopen or retransmission timer work.
 * Lynx/emoji-heavy pages need user retesting with `build\Debug\putty.exe` after rebuilding once the currently running PuTTY is closed.
+* Up-arrow-after-login issue still needs investigation if it persists after the UTF-8/default rebuild; likely candidates are startup tty modes or local line discipline state before UDP readiness.
 
 ## Exact Next Step
 
-Close any running `build\Debug\putty.exe`, rerun `cmake --build build --target putty --config Debug`, then test Lynx on the emoji-heavy/forum page. Check the PuTTY Event Log for the new "no raw host-output bytes" diagnostic; if it appears, prioritize implementing the real Mosh terminal-state renderer over further raw-output fixes.
+Close any running `build\Debug\putty.exe`, rerun `cmake --build build --target putty --config Debug`, then test Lynx on the emoji-heavy/forum page. If it renders, the cause was Mosh sessions not defaulting the Windows terminal to UTF-8 early enough. If it still freezes, check the PuTTY Event Log for the new "no raw host-output bytes" diagnostic; if it appears, prioritize implementing the real Mosh terminal-state renderer over further raw-output fixes.

@@ -124,6 +124,7 @@ static bool get_fullscreen_rect(WinGuiSeat *wgs, RECT *ss);
 static bool get_workingarea_rect(WinGuiSeat *wgs, RECT *ss);
 
 static void conf_cache_data(WinGuiSeat *wgs);
+static void mosh_force_utf8_default(Conf *conf);
 
 static struct sesslist sesslist;       /* for saved-session menu */
 
@@ -148,6 +149,13 @@ struct WinGuiSeatListNode wgslisthead = {
      ((wch) >= 0xFE00 && (wch) <= 0xFE0F)) /* VARIATION SELECTOR 1-16 */
 
 static bool wintw_setup_draw_ctx(TermWin *);
+
+static void mosh_force_utf8_default(Conf *conf)
+{
+    if (conf_get_int(conf, CONF_protocol) == PROT_MOSH &&
+        !*conf_get_str(conf, CONF_line_codepage))
+        conf_set_str(conf, CONF_line_codepage, "UTF-8");
+}
 static void wintw_draw_text(TermWin *, int x, int y, wchar_t *text, int len,
                             unsigned long attrs, int lattrs, truecolour tc);
 static void wintw_draw_cursor(TermWin *, int x, int y, wchar_t *text, int len,
@@ -514,6 +522,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      * session, this will detour via the config box.)
      */
     gui_term_process_cmdline(wgs->conf, cmdline);
+    mosh_force_utf8_default(wgs->conf);
 
     memset(&wgs->ucsdata, 0, sizeof(wgs->ucsdata));
 
