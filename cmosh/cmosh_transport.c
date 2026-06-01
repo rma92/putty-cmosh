@@ -5,12 +5,32 @@
 #include "cmosh_proto.h"
 #include "cmosh_session.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 void cmosh_transport_init(struct cmosh_transport_state *st)
 {
     if (st)
         memset(st, 0, sizeof(*st));
+}
+
+void cmosh_transport_clear(struct cmosh_transport_state *st)
+{
+    size_t i;
+
+    if (!st)
+        return;
+    for (i = 0; i < CMOSH_TRANSPORT_FRAGMENT_MAX; i++) {
+        free(st->fragments[i].payload);
+        st->fragments[i].payload = NULL;
+        st->fragments[i].len = 0;
+        st->fragments[i].present = 0;
+    }
+    st->fragment_active = 0;
+    st->fragment_id = 0;
+    st->fragment_arrived = 0;
+    st->fragment_total = 0;
+    st->fragment_have_final = 0;
 }
 
 int cmosh_transport_note_recv(struct cmosh_transport_state *st, uint64_t seq)
@@ -91,29 +111,17 @@ int cmosh_transport_make_packet(const unsigned char key[16], uint64_t seq,
                                           packet_cap, packet_len);
 }
 
-int cmosh_transport_decode_packet(
-    const unsigned char key[16], const unsigned char *packet,
-    size_t packet_len, struct cmosh_transport_instruction *ti,
-    unsigned char *diff_buf, size_t diff_buf_len, unsigned int *timestamp,
-    unsigned int *echo_timestamp, uint64_t *seq)
+static int cmosh_transport_decode_instruction(
+    const unsigned char *compressed, size_t compressed_len,
+    struct cmosh_transport_instruction *ti, unsigned char *diff_buf,
+    size_t diff_buf_len)
 {
-    unsigned char plain[CMOSH_MAX_PACKET];
     unsigned char decompressed[CMOSH_SERVER_DIFF_MAX + 1024];
-    size_t plain_len, decompressed_len;
-    struct cmosh_fragment frag;
+    size_t decompressed_len;
 
-    if (!timestamp || !echo_timestamp || !ti || (!diff_buf && diff_buf_len))
+    if (!compressed || !ti || (!diff_buf && diff_buf_len))
         return -1;
-    if (cmosh_transport_decrypt_packet(key, packet, packet_len, plain,
-                                       sizeof(plain), &plain_len, seq) != 0)
-        return -1;
-    if (plain_len < 4)
-        return -1;
-    *timestamp = ((unsigned)plain[0] << 8) | plain[1];
-    *echo_timestamp = ((unsigned)plain[2] << 8) | plain[3];
-    if (cmosh_decode_fragment(plain + 4, plain_len - 4, &frag) != 0)
-        return -1;
-    if (cmosh_zlib_store_decompress(frag.payload, frag.payload_len,
+    if (cmosh_zlib_store_decompress(compressed, compressed_len,
                                     decompressed, sizeof(decompressed),
                                     &decompressed_len) != 0)
         return -1;
@@ -129,6 +137,142 @@ int cmosh_transport_decode_packet(
     if (ti->chaff_len)
         ti->chaff = NULL;
     return 0;
+}
+
+static int cmosh_transport_reassemble_fragment(
+    struct cmosh_transport_state *st, const struct cmosh_fragment *frag,
+    unsigned char *assembled, size_t assembled_len, size_t *written)
+{
+    unsigned char *copy;
+    size_t i, pos = 0;
+
+    if (!st || !frag || !assembled || !written ||
+        frag->index >= CMOSH_TRANSPORT_FRAGMENT_MAX)
+        return -1;
+
+    if (!st->fragment_active || st->fragment_id != frag->id) {
+        cmosh_transport_clear(st);
+        st->fragment_active = 1;
+        st->fragment_id = frag->id;
+    }
+
+    if (st->fragment_have_final && frag->index >= st->fragment_total)
+        return -1;
+
+    if (st->fragments[frag->index].present) {
+        if (st->fragments[frag->index].len != frag->payload_len ||
+            memcmp(st->fragments[frag->index].payload, frag->payload,
+                   frag->payload_len) != 0)
+            return -1;
+    } else {
+        copy = NULL;
+        if (frag->payload_len) {
+            copy = (unsigned char *)malloc(frag->payload_len);
+            if (!copy)
+                return -1;
+            memcpy(copy, frag->payload, frag->payload_len);
+        }
+        st->fragments[frag->index].payload = copy;
+        st->fragments[frag->index].len = frag->payload_len;
+        st->fragments[frag->index].present = 1;
+        st->fragment_arrived++;
+    }
+
+    if (frag->final) {
+        unsigned int total = frag->index + 1;
+
+        if (st->fragment_have_final && st->fragment_total != total)
+            return -1;
+        st->fragment_have_final = 1;
+        st->fragment_total = total;
+    }
+
+    if (!st->fragment_have_final ||
+        st->fragment_arrived < st->fragment_total)
+        return 1;
+
+    for (i = 0; i < st->fragment_total; i++) {
+        if (!st->fragments[i].present ||
+            st->fragments[i].len > assembled_len - pos)
+            return -1;
+        if (st->fragments[i].len)
+            memcpy(assembled + pos, st->fragments[i].payload,
+                   st->fragments[i].len);
+        pos += st->fragments[i].len;
+    }
+
+    *written = pos;
+    cmosh_transport_clear(st);
+    return 0;
+}
+
+int cmosh_transport_decode_packet(
+    const unsigned char key[16], const unsigned char *packet,
+    size_t packet_len, struct cmosh_transport_instruction *ti,
+    unsigned char *diff_buf, size_t diff_buf_len, unsigned int *timestamp,
+    unsigned int *echo_timestamp, uint64_t *seq)
+{
+    unsigned char plain[CMOSH_MAX_PACKET];
+    size_t plain_len;
+    struct cmosh_fragment frag;
+
+    if (!timestamp || !echo_timestamp || !ti || (!diff_buf && diff_buf_len))
+        return -1;
+    if (cmosh_transport_decrypt_packet(key, packet, packet_len, plain,
+                                       sizeof(plain), &plain_len, seq) != 0)
+        return -1;
+    if (plain_len < 4)
+        return -1;
+    *timestamp = ((unsigned)plain[0] << 8) | plain[1];
+    *echo_timestamp = ((unsigned)plain[2] << 8) | plain[3];
+    if (cmosh_decode_fragment(plain + 4, plain_len - 4, &frag) != 0 ||
+        frag.index != 0 || !frag.final)
+        return -1;
+    return cmosh_transport_decode_instruction(frag.payload, frag.payload_len,
+                                              ti, diff_buf, diff_buf_len);
+}
+
+int cmosh_transport_decode_packet_state(
+    struct cmosh_transport_state *st, const unsigned char key[16],
+    const unsigned char *packet, size_t packet_len,
+    struct cmosh_transport_instruction *ti, unsigned char *diff_buf,
+    size_t diff_buf_len, unsigned int *timestamp,
+    unsigned int *echo_timestamp, uint64_t *seq)
+{
+    unsigned char plain[CMOSH_MAX_PACKET];
+    unsigned char assembled[CMOSH_SERVER_DIFF_MAX + 1024];
+    size_t plain_len, assembled_len;
+    struct cmosh_fragment frag;
+    int ret;
+
+    if (!st || !timestamp || !echo_timestamp || !ti ||
+        (!diff_buf && diff_buf_len))
+        return -1;
+    if (cmosh_transport_decrypt_packet(key, packet, packet_len, plain,
+                                       sizeof(plain), &plain_len, seq) != 0)
+        return -1;
+    if (cmosh_transport_note_recv(st, *seq) != 0)
+        return 2;
+    if (plain_len < 4)
+        return -1;
+    *timestamp = ((unsigned)plain[0] << 8) | plain[1];
+    *echo_timestamp = ((unsigned)plain[2] << 8) | plain[3];
+    if (cmosh_decode_fragment(plain + 4, plain_len - 4, &frag) != 0)
+        return -1;
+
+    if (frag.index == 0 && frag.final) {
+        return cmosh_transport_decode_instruction(frag.payload,
+                                                  frag.payload_len, ti,
+                                                  diff_buf, diff_buf_len);
+    }
+
+    ret = cmosh_transport_reassemble_fragment(st, &frag, assembled,
+                                              sizeof(assembled),
+                                              &assembled_len);
+    if (ret != 0)
+        return ret;
+    return cmosh_transport_decode_instruction(assembled, assembled_len, ti,
+                                              diff_buf, diff_buf_len);
 }
 
 void cmosh_transport_nonce_from_seq(uint64_t seq, unsigned char nonce[8])

@@ -386,6 +386,75 @@ static void test_transport(void)
               ti.diff == diff_copy && ti.diff_len == sizeof(diff) &&
               memcmp(diff_copy, diff, sizeof(diff)) == 0,
           "transport decode instruction packet owns diff");
+
+    {
+        unsigned char instruction[128], compressed[256], fragment[256];
+        unsigned char packet2[256], plain2[300];
+        const unsigned char fdiff[] = "fragmented";
+        size_t instruction_len, compressed_len, fragment_len, plain_len;
+        size_t split;
+        int decode_result;
+
+        cmosh_transport_init(&st);
+        memset(&ti, 0, sizeof(ti));
+        ti.protocol_version = CMOSH_PROTOCOL_VERSION;
+        ti.old_num = 4;
+        ti.new_num = 5;
+        ti.ack_num = 6;
+        ti.diff = fdiff;
+        ti.diff_len = sizeof(fdiff);
+        check(cmosh_encode_transport_instruction(&ti, instruction,
+                                                 sizeof(instruction),
+                                                 &instruction_len) == 0,
+              "encode fragmented transport instruction");
+        check(cmosh_zlib_store_compress(instruction, instruction_len,
+                                        compressed, sizeof(compressed),
+                                        &compressed_len) == 0,
+              "compress fragmented transport instruction");
+        split = compressed_len / 2;
+
+        check(cmosh_encode_fragment(99, 0, 0, compressed, split, fragment,
+                                    sizeof(fragment), &fragment_len) == 0,
+              "encode first transport fragment");
+        plain2[0] = 0x12;
+        plain2[1] = 0x34;
+        plain2[2] = 0x56;
+        plain2[3] = 0x78;
+        memcpy(plain2 + 4, fragment, fragment_len);
+        plain_len = fragment_len + 4;
+        check(cmosh_transport_encrypt_packet(
+                  key, CMOSH_CLIENT_NONCE_BASE | 40, plain2, plain_len,
+                  packet2, sizeof(packet2), &n) == 0,
+              "encrypt first transport fragment");
+        memset(&ti, 0, sizeof(ti));
+        decode_result = cmosh_transport_decode_packet_state(
+            &st, key, packet2, n, &ti, diff_copy, sizeof(diff_copy),
+            &timestamp, &echo_timestamp, &seq);
+        check(decode_result == 1 &&
+                  seq == (CMOSH_CLIENT_NONCE_BASE | 40),
+              "transport waits for fragmented instruction");
+
+        check(cmosh_encode_fragment(99, 1, 1, compressed + split,
+                                    compressed_len - split, fragment,
+                                    sizeof(fragment), &fragment_len) == 0,
+              "encode final transport fragment");
+        memcpy(plain2 + 4, fragment, fragment_len);
+        plain_len = fragment_len + 4;
+        check(cmosh_transport_encrypt_packet(
+                  key, CMOSH_CLIENT_NONCE_BASE | 41, plain2, plain_len,
+                  packet2, sizeof(packet2), &n) == 0,
+              "encrypt final transport fragment");
+        memset(&ti, 0, sizeof(ti));
+        memset(diff_copy, 0, sizeof(diff_copy));
+        decode_result = cmosh_transport_decode_packet_state(
+            &st, key, packet2, n, &ti, diff_copy, sizeof(diff_copy),
+            &timestamp, &echo_timestamp, &seq);
+        check(decode_result == 0 && ti.old_num == 4 && ti.new_num == 5 &&
+                  ti.ack_num == 6 && ti.diff_len == sizeof(fdiff) &&
+                  memcmp(diff_copy, fdiff, sizeof(fdiff)) == 0,
+              "transport reassembles fragmented instruction");
+        cmosh_transport_clear(&st);
+    }
 }
 
 static void test_session(void)

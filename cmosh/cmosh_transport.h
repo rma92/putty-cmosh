@@ -11,8 +11,15 @@
 #define CMOSH_SERVER_NONCE_BASE UINT64_C(0x8000000000000000)
 #define CMOSH_PROTOCOL_VERSION 2
 #define CMOSH_TRANSPORT_REPLAY_HISTORY 64
+#define CMOSH_TRANSPORT_FRAGMENT_MAX 128
 
 struct cmosh_transport_instruction;
+
+struct cmosh_transport_fragment_piece {
+    unsigned char *payload;
+    size_t len;
+    int present;
+};
 
 struct cmosh_transport_state {
     uint64_t send_seq;
@@ -21,9 +28,17 @@ struct cmosh_transport_state {
     uint64_t recv_history[CMOSH_TRANSPORT_REPLAY_HISTORY];
     size_t recv_history_next;
     size_t recv_history_count;
+    int fragment_active;
+    uint64_t fragment_id;
+    size_t fragment_arrived;
+    unsigned int fragment_total;
+    int fragment_have_final;
+    struct cmosh_transport_fragment_piece
+        fragments[CMOSH_TRANSPORT_FRAGMENT_MAX];
 };
 
 void cmosh_transport_init(struct cmosh_transport_state *st);
+void cmosh_transport_clear(struct cmosh_transport_state *st);
 int cmosh_transport_note_recv(struct cmosh_transport_state *st, uint64_t seq);
 int cmosh_transport_crypto_available(void);
 void cmosh_transport_nonce_from_seq(uint64_t seq, unsigned char nonce[8]);
@@ -39,6 +54,12 @@ int cmosh_transport_decode_packet(
     const unsigned char key[16], const unsigned char *packet,
     size_t packet_len, struct cmosh_transport_instruction *ti,
     unsigned char *diff_buf, size_t diff_buf_len, unsigned int *timestamp,
+    unsigned int *echo_timestamp, uint64_t *seq);
+int cmosh_transport_decode_packet_state(
+    struct cmosh_transport_state *st, const unsigned char key[16],
+    const unsigned char *packet, size_t packet_len,
+    struct cmosh_transport_instruction *ti, unsigned char *diff_buf,
+    size_t diff_buf_len, unsigned int *timestamp,
     unsigned int *echo_timestamp, uint64_t *seq);
 int cmosh_transport_encrypt_packet(const unsigned char key[16], uint64_t seq,
                                    const unsigned char *plain,

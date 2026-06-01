@@ -29,6 +29,7 @@ struct Mosh {
     Backend *ssh_backend;
     Socket *udp_socket;
     struct cmosh_client client;
+    struct cmosh_transport_state bootstrap_transport;
     strbuf *bootstrap_output;
     struct cmosh_bootstrap bootstrap;
     char udp_host[256];
@@ -285,9 +286,12 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
         return;
 
     if (!mosh->udp_ready) {
-        if (cmosh_transport_decode_packet(
-                mosh->bootstrap.key, (const unsigned char *)data, len, &ti,
-                diff, sizeof(diff), &timestamp, &echo_timestamp, &seq) != 0)
+        int decode_result = cmosh_transport_decode_packet_state(
+            &mosh->bootstrap_transport, mosh->bootstrap.key,
+            (const unsigned char *)data, len, &ti, diff, sizeof(diff),
+            &timestamp, &echo_timestamp, &seq);
+
+        if (decode_result != 0)
             return;
 
         if (cmosh_client_make_start_ack(mosh->bootstrap.key, timestamp,
@@ -312,6 +316,10 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
                                     sizeof(diff), mosh_host_output, mosh,
                                     &event) == CMOSH_CLIENT_RECV_BAD_PACKET)
         return;
+    if (event.result == CMOSH_CLIENT_RECV_PENDING) {
+        cmosh_client_note_recv_time(&mosh->client, (uint64_t)GETTICKCOUNT());
+        return;
+    }
     if (event.result == CMOSH_CLIENT_RECV_DUPLICATE) {
         cmosh_client_note_recv_time(&mosh->client, (uint64_t)GETTICKCOUNT());
         mosh_send_ack(mosh, GETTICKCOUNT());
@@ -735,6 +743,8 @@ static void mosh_free(Backend *be)
     expire_timer_context(mosh);
     if (mosh->udp_socket)
         sk_close(mosh->udp_socket);
+    cmosh_transport_clear(&mosh->bootstrap_transport);
+    cmosh_transport_clear(&mosh->client.recv_transport);
     cmosh_server_queue_clear(&mosh->client.server_queue);
     if (mosh->ssh_backend)
         backend_free(mosh->ssh_backend);

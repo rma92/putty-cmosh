@@ -744,6 +744,17 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                     (unsigned long long)seq);
                                         continue;
                                     }
+                                    if (event.result ==
+                                        CMOSH_CLIENT_RECV_PENDING) {
+                                        cmosh_client_note_recv_time(
+                                            &client, cmosh_now_ms());
+                                        if (verbose)
+                                            fprintf(stderr,
+                                                    "cmosh: received partial "
+                                                    "fragment seq=%llu\n",
+                                                    (unsigned long long)seq);
+                                        continue;
+                                    }
                                     cmosh_client_note_recv_time(
                                         &client, cmosh_now_ms());
                                     if (event.queued_future && verbose)

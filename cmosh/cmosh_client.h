@@ -27,6 +27,7 @@ struct cmosh_client {
 
 enum cmosh_client_recv_result {
     CMOSH_CLIENT_RECV_OK,
+    CMOSH_CLIENT_RECV_PENDING,
     CMOSH_CLIENT_RECV_DUPLICATE,
     CMOSH_CLIENT_RECV_BAD_PACKET,
 };

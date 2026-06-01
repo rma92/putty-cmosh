@@ -184,15 +184,19 @@ enum cmosh_client_recv_result cmosh_client_recv_packet(
     uint64_t *seq)
 {
     unsigned int echo_timestamp;
+    int decode_result;
 
     if (!client)
         return CMOSH_CLIENT_RECV_BAD_PACKET;
-    if (cmosh_transport_decode_packet(client->key, packet, packet_len, ti,
-                                      diff_buf, diff_buf_len, timestamp,
-                                      &echo_timestamp, seq) != 0)
-        return CMOSH_CLIENT_RECV_BAD_PACKET;
-    if (cmosh_transport_note_recv(&client->recv_transport, *seq) != 0)
+    decode_result = cmosh_transport_decode_packet_state(
+        &client->recv_transport, client->key, packet, packet_len, ti,
+        diff_buf, diff_buf_len, timestamp, &echo_timestamp, seq);
+    if (decode_result == 1)
+        return CMOSH_CLIENT_RECV_PENDING;
+    if (decode_result == 2)
         return CMOSH_CLIENT_RECV_DUPLICATE;
+    if (decode_result != 0)
+        return CMOSH_CLIENT_RECV_BAD_PACKET;
 
     client->echo_timestamp = *timestamp;
     cmosh_input_note_ack(&client->input, ti->ack_num);
