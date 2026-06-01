@@ -58,6 +58,11 @@ struct cmosh_client_idle_event {
     int retransmitted;
     uint64_t gap_old_num;
     uint64_t gap_new_num;
+    uint64_t retransmit_state;
+    uint64_t input_acked;
+    uint64_t input_current;
+    size_t input_records;
+    size_t input_bytes;
 };
 
 void cmosh_client_init(struct cmosh_client *client,

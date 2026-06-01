@@ -31,13 +31,16 @@ struct Mosh {
     struct cmosh_client client;
     struct cmosh_transport_state bootstrap_transport;
     strbuf *bootstrap_output;
+    strbuf *pending_input;
     struct cmosh_bootstrap bootstrap;
+    Ldisc *ldisc;
     char udp_host[256];
     char *description;
     char *bootstrap_command;
     char *ssh_host;
     unsigned int cols, rows;
     int exitcode;
+    uint64_t last_input_diag_ms;
     bool udp_started;
     bool udp_start_queued;
     bool udp_ready;
@@ -54,6 +57,8 @@ static bool mosh_open_udp_socket(Mosh *mosh, bool fatal_on_error);
 static bool mosh_reopen_udp_socket(Mosh *mosh);
 static bool mosh_start_udp(Mosh *mosh);
 static void mosh_start_udp_callback(void *ctx);
+static void mosh_try_send_pending(Mosh *mosh);
+static bool mosh_sendok(Backend *be);
 
 static char *mosh_description(Interactor *itr)
 {
@@ -225,8 +230,23 @@ static void mosh_send_idle(Mosh *mosh, unsigned long now)
                  "Mosh UDP timeout; no server packet received recently");
         mosh_reopen_udp_socket(mosh);
     }
+    if (event.retransmitted &&
+        (uint64_t)now - mosh->last_input_diag_ms >= 5000U) {
+        char msg[192];
+        snprintf(msg, sizeof(msg),
+                 "Mosh retransmitting input state=%llu acked=%llu "
+                 "current=%llu queued=%u bytes=%u",
+                 (unsigned long long)event.retransmit_state,
+                 (unsigned long long)event.input_acked,
+                 (unsigned long long)event.input_current,
+                 (unsigned)event.input_records,
+                 (unsigned)event.input_bytes);
+        logevent(mosh->logctx, msg);
+        mosh->last_input_diag_ms = (uint64_t)now;
+    }
     if (packet_len)
         mosh_udp_send(mosh, packet, packet_len);
+    mosh_try_send_pending(mosh);
 }
 
 static void mosh_send_ack(Mosh *mosh, unsigned long now)
@@ -308,6 +328,9 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
         mosh->udp_ready = true;
         seat_notify_session_started(mosh->seat);
         seat_update_specials_menu(mosh->seat);
+        mosh_try_send_pending(mosh);
+        if (mosh->ldisc)
+            ldisc_check_sendok(mosh->ldisc);
         return;
     }
 
@@ -338,6 +361,9 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
 
     if (event.should_ack)
         mosh_send_ack(mosh, GETTICKCOUNT());
+    mosh_try_send_pending(mosh);
+    if (mosh->ldisc && mosh_sendok(&mosh->backend))
+        ldisc_check_sendok(mosh->ldisc);
 }
 
 static const PlugVtable Mosh_udp_plugvt = {
@@ -706,6 +732,7 @@ static char *mosh_init(const BackendVtable *vt, Seat *seat,
     mosh->description = default_description(vt, host, port);
     mosh->ssh_host = dupstr(host);
     mosh->bootstrap_output = strbuf_new();
+    mosh->pending_input = strbuf_new();
     mosh->cols = 80;
     mosh->rows = 24;
     mosh->exitcode = INT_MAX;
@@ -750,6 +777,8 @@ static void mosh_free(Backend *be)
         backend_free(mosh->ssh_backend);
     if (mosh->bootstrap_output)
         strbuf_free(mosh->bootstrap_output);
+    if (mosh->pending_input)
+        strbuf_free(mosh->pending_input);
     conf_free(mosh->conf);
     conf_free(mosh->ssh_conf);
     sfree(mosh->description);
@@ -762,15 +791,58 @@ static void mosh_reconfig(Backend *be, Conf *conf)
 {
 }
 
+static void mosh_consume_pending_input(Mosh *mosh, size_t len)
+{
+    if (!len || !mosh->pending_input)
+        return;
+    if (len >= mosh->pending_input->len) {
+        strbuf_clear(mosh->pending_input);
+        return;
+    }
+    memmove(mosh->pending_input->u, mosh->pending_input->u + len,
+            mosh->pending_input->len - len);
+    strbuf_shrink_to(mosh->pending_input, mosh->pending_input->len - len);
+}
+
+static void mosh_try_send_pending(Mosh *mosh)
+{
+    unsigned char packet[CMOSH_MAX_PACKET];
+    size_t packet_len = 0;
+    uint64_t now;
+
+    if (!mosh->udp_ready || mosh->shutdown || !mosh->pending_input)
+        return;
+    now = (uint64_t)GETTICKCOUNT();
+    while (mosh->pending_input->len) {
+        size_t chunk = mosh->pending_input->len;
+        size_t room;
+
+        if (mosh->client.input.nrecords >= CMOSH_INPUT_MAX_RECORDS)
+            return;
+        room = CMOSH_INPUT_MAX_BYTES - mosh->client.input.bytes_len;
+        if (!room)
+            return;
+        if (chunk > room)
+            chunk = room;
+        if (chunk > CMOSH_CLIENT_INPUT_CHUNK_MAX)
+            chunk = CMOSH_CLIENT_INPUT_CHUNK_MAX;
+        if (cmosh_client_make_input(&mosh->client,
+                                    mosh->pending_input->u,
+                                    chunk, now,
+                                    mosh_now16((unsigned long)now),
+                                    packet, sizeof(packet),
+                                    &packet_len) != 0)
+            return;
+        mosh_udp_send(mosh, packet, packet_len);
+        mosh_consume_pending_input(mosh, chunk);
+    }
+}
+
 static void mosh_send(Backend *be, const char *buf, size_t len)
 {
     Mosh *mosh = container_of(be, Mosh, backend);
-    unsigned char packet[CMOSH_MAX_PACKET];
-    size_t packet_len = 0;
-    size_t pos = 0;
-    uint64_t now;
 
-    if (!mosh->udp_ready || mosh->shutdown || !len)
+    if (mosh->shutdown || !len)
         return;
 
     if (memchr(buf, 0x1d, len)) {
@@ -779,31 +851,17 @@ static void mosh_send(Backend *be, const char *buf, size_t len)
         return;
     }
 
-    now = (uint64_t)GETTICKCOUNT();
-    while (pos < len) {
-        size_t chunk = len - pos;
-
-        if (chunk > CMOSH_CLIENT_INPUT_CHUNK_MAX)
-            chunk = CMOSH_CLIENT_INPUT_CHUNK_MAX;
-        if (cmosh_client_make_input(&mosh->client,
-                                    (const unsigned char *)buf + pos,
-                                    chunk, now,
-                                    mosh_now16((unsigned long)now),
-                                    packet, sizeof(packet),
-                                    &packet_len) != 0)
-            return;
-        mosh_udp_send(mosh, packet, packet_len);
-        pos += chunk;
-    }
+    memcpy(strbuf_append(mosh->pending_input, len), buf, len);
+    mosh_try_send_pending(mosh);
 }
 
 static size_t mosh_sendbuffer(Backend *be)
 {
     Mosh *mosh = container_of(be, Mosh, backend);
 
-    if (!mosh->udp_ready || mosh->shutdown)
+    if (mosh->shutdown)
         return 0;
-    return mosh->client.input.bytes_len;
+    return mosh->client.input.bytes_len + mosh->pending_input->len;
 }
 
 static void mosh_size(Backend *be, int width, int height)
@@ -860,6 +918,7 @@ static bool mosh_sendok(Backend *be)
     Mosh *mosh = container_of(be, Mosh, backend);
 
     return mosh->udp_ready && !mosh->shutdown &&
+           mosh->pending_input->len == 0 &&
            mosh->client.input.nrecords < CMOSH_INPUT_MAX_RECORDS &&
            mosh->client.input.bytes_len < CMOSH_INPUT_MAX_BYTES;
 }
@@ -871,6 +930,8 @@ static bool mosh_ldisc_option_state(Backend *be, int option)
 
 static void mosh_provide_ldisc(Backend *be, Ldisc *ldisc)
 {
+    Mosh *mosh = container_of(be, Mosh, backend);
+    mosh->ldisc = ldisc;
 }
 
 static void mosh_unthrottle(Backend *be, size_t bufsize)

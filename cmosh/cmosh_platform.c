@@ -850,12 +850,18 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                 if (packet_len && verbose) {
                                     fprintf(stderr,
                                             "cmosh: sent keepalive ack=%llu "
-                                            "client state=%llu retry=%u\n",
+                                            "client state=%llu retry=%u "
+                                            "retry_state=%llu queued=%u "
+                                            "bytes=%u\n",
                                             (unsigned long long)
                                                 client.server_state,
                                             (unsigned long long)
                                                 client.input.current,
-                                            idle_event.retransmitted);
+                                            idle_event.retransmitted,
+                                            (unsigned long long)
+                                                idle_event.retransmit_state,
+                                            (unsigned)idle_event.input_records,
+                                            (unsigned)idle_event.input_bytes);
                                 }
                             }
                         }

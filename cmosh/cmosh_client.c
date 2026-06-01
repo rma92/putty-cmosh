@@ -194,6 +194,7 @@ int cmosh_client_make_idle_event(struct cmosh_client *client, uint64_t now_ms,
     int retransmitted = 0;
     int missing_state, udp_timeout;
     struct cmosh_input_record *retry;
+    uint64_t retransmit_state = 0;
 
     if (event)
         memset(event, 0, sizeof(*event));
@@ -201,6 +202,12 @@ int cmosh_client_make_idle_event(struct cmosh_client *client, uint64_t now_ms,
         *packet_len = 0;
     if (!client)
         return -1;
+    if (event) {
+        event->input_acked = client->input.acked;
+        event->input_current = client->input.current;
+        event->input_records = client->input.nrecords;
+        event->input_bytes = client->input.bytes_len;
+    }
 
     missing_state = cmosh_client_missing_state_diag_due(
         client, now_ms, event ? &event->gap_old_num : NULL,
@@ -212,6 +219,8 @@ int cmosh_client_make_idle_event(struct cmosh_client *client, uint64_t now_ms,
     }
 
     retry = cmosh_input_retransmit_record(&client->input, now_ms);
+    if (retry)
+        retransmit_state = retry->state;
     if (!retry && !missing_state && !udp_timeout &&
         client->last_idle_sent_ms != UINT64_MAX &&
         now_ms - client->last_idle_sent_ms < CMOSH_CLIENT_IDLE_KEEPALIVE_MS)
@@ -221,8 +230,15 @@ int cmosh_client_make_idle_event(struct cmosh_client *client, uint64_t now_ms,
                                packet_len, &retransmitted) != 0)
         return -1;
     client->last_idle_sent_ms = now_ms;
-    if (event)
+    if (event) {
         event->retransmitted = retransmitted;
+        if (retransmitted)
+            event->retransmit_state = retransmit_state;
+        event->input_acked = client->input.acked;
+        event->input_current = client->input.current;
+        event->input_records = client->input.nrecords;
+        event->input_bytes = client->input.bytes_len;
+    }
     return 0;
 }
 

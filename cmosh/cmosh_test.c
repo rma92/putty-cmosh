@@ -776,7 +776,12 @@ static void test_client(void)
         check(cmosh_client_make_idle_event(
                   &client, 200 + CMOSH_INPUT_RETRY_FIRST_MS, 0x3aaa, packet,
                   sizeof(packet), &n, &idle_event) == 0 &&
-                  idle_event.retransmitted,
+                  idle_event.retransmitted &&
+                  idle_event.retransmit_state == 12 &&
+                  idle_event.input_acked == 11 &&
+                  idle_event.input_current == 12 &&
+                  idle_event.input_records == 1 &&
+                  idle_event.input_bytes == resize_diff_len,
               "client resize retransmit due");
         memset(&ti, 0, sizeof(ti));
         check(cmosh_transport_decode_packet(key, packet, n, &ti, diff,
