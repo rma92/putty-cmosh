@@ -97,11 +97,12 @@ int cmosh_client_make_input(struct cmosh_client *client,
     size_t diff_len;
     uint64_t old_client_state;
 
-    if (!client || !keys || !keys_len)
+    if (!client || !keys || !keys_len ||
+        keys_len > CMOSH_CLIENT_INPUT_CHUNK_MAX)
         return -1;
-    if (cmosh_input_append(&client->input, keys, keys_len, now_ms) != 0 ||
-        cmosh_encode_user_keystroke_message(keys, keys_len, diff,
-                                            sizeof(diff), &diff_len) != 0)
+    if (cmosh_encode_user_keystroke_message(keys, keys_len, diff,
+                                            sizeof(diff), &diff_len) != 0 ||
+        cmosh_input_append(&client->input, keys, keys_len, now_ms) != 0)
         return -1;
     old_client_state = client->input.current - 1;
     return cmosh_transport_make_packet(

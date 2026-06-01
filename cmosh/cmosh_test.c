@@ -453,6 +453,64 @@ static void test_transport(void)
                   ti.ack_num == 6 && ti.diff_len == sizeof(fdiff) &&
                   memcmp(diff_copy, fdiff, sizeof(fdiff)) == 0,
               "transport reassembles fragmented instruction");
+
+        check(cmosh_encode_fragment(100, 0, 0, compressed, split,
+                                    fragment, sizeof(fragment),
+                                    &fragment_len) == 0,
+              "encode stale first transport fragment");
+        memcpy(plain2 + 4, fragment, fragment_len);
+        plain_len = fragment_len + 4;
+        check(cmosh_transport_encrypt_packet(
+                  key, CMOSH_CLIENT_NONCE_BASE | 42, plain2, plain_len,
+                  packet2, sizeof(packet2), &n) == 0,
+              "encrypt stale first transport fragment");
+        memset(&ti, 0, sizeof(ti));
+        check(cmosh_transport_decode_packet_state(
+                  &st, key, packet2, n, &ti, diff_copy,
+                  sizeof(diff_copy), &timestamp, &echo_timestamp, &seq) == 1,
+              "transport waits for stale fragment");
+        check(cmosh_transport_make_packet(key, 12, 5, 6, 7, fdiff,
+                                          sizeof(fdiff), 0x1234, 0x5678,
+                                          packet2, sizeof(packet2), &n) == 0,
+              "make complete packet after stale fragment");
+        memset(&ti, 0, sizeof(ti));
+        memset(diff_copy, 0, sizeof(diff_copy));
+        check(cmosh_transport_decode_packet_state(
+                  &st, key, packet2, n, &ti, diff_copy,
+                  sizeof(diff_copy), &timestamp, &echo_timestamp, &seq) == 0 &&
+                  ti.old_num == 5 && ti.new_num == 6 &&
+                  memcmp(diff_copy, fdiff, sizeof(fdiff)) == 0 &&
+                  !st.fragment_active,
+              "transport complete packet clears stale fragment");
+
+        cmosh_transport_clear(&st);
+        check(cmosh_encode_fragment(101, 0, 0, compressed, split,
+                                    fragment, sizeof(fragment),
+                                    &fragment_len) == 0,
+              "encode conflict first transport fragment");
+        memcpy(plain2 + 4, fragment, fragment_len);
+        plain_len = fragment_len + 4;
+        check(cmosh_transport_encrypt_packet(
+                  key, CMOSH_CLIENT_NONCE_BASE | 43, plain2, plain_len,
+                  packet2, sizeof(packet2), &n) == 0,
+              "encrypt conflict first transport fragment");
+        memset(&ti, 0, sizeof(ti));
+        check(cmosh_transport_decode_packet_state(
+                  &st, key, packet2, n, &ti, diff_copy,
+                  sizeof(diff_copy), &timestamp, &echo_timestamp, &seq) == 1,
+              "transport waits for conflict fragment");
+        fragment[10] ^= 1;
+        memcpy(plain2 + 4, fragment, fragment_len);
+        check(cmosh_transport_encrypt_packet(
+                  key, CMOSH_CLIENT_NONCE_BASE | 44, plain2, plain_len,
+                  packet2, sizeof(packet2), &n) == 0,
+              "encrypt conflicting transport fragment");
+        memset(&ti, 0, sizeof(ti));
+        check(cmosh_transport_decode_packet_state(
+                  &st, key, packet2, n, &ti, diff_copy,
+                  sizeof(diff_copy), &timestamp, &echo_timestamp, &seq) < 0 &&
+                  !st.fragment_active,
+              "transport clears conflicting fragment state");
         cmosh_transport_clear(&st);
     }
 }
@@ -642,6 +700,23 @@ static void test_client(void)
                                   &n) == 0 &&
               client.input.current == 11 && client.send_seq == 5,
           "client make input");
+    {
+        unsigned char bigkeys[CMOSH_CLIENT_INPUT_CHUNK_MAX + 1];
+        uint64_t current = client.input.current;
+        uint64_t send_seq = client.send_seq;
+        size_t nrecords = client.input.nrecords;
+        size_t bytes_len = client.input.bytes_len;
+
+        memset(bigkeys, 'p', sizeof(bigkeys));
+        check(cmosh_client_make_input(&client, bigkeys, sizeof(bigkeys),
+                                      101, 0x3334, packet, sizeof(packet),
+                                      &n) != 0 &&
+                  client.input.current == current &&
+                  client.send_seq == send_seq &&
+                  client.input.nrecords == nrecords &&
+                  client.input.bytes_len == bytes_len,
+              "client oversized input does not advance state");
+    }
     memset(&ti, 0, sizeof(ti));
     check(cmosh_transport_decode_packet(key, packet, n, &ti, diff,
                                         sizeof(diff), &timestamp, &timestamp,

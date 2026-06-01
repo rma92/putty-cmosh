@@ -4,7 +4,7 @@
 
 Continue stabilizing native PuTTY Mosh and `cmosh`, with emphasis on UDP robustness, input retransmission correctness, terminal redraw behavior, and eventual replacement of raw host-output rendering with a real terminal-state model.
 
-Latest user feedback: maximize/restore now works. Lynx works on some pages, but a larger emoji-heavy forum page can still fail to render over Mosh while the same page renders over SSH. User also reports that sometimes pressing Up for shell history just after login moves the cursor up a line.
+Latest user feedback: maximize/restore works, and the previously failing Lynx/emoji-heavy page now works after receive-side fragment reassembly. User asked to continue and prioritize transport hardening. User also previously reported that sometimes pressing Up for shell history just after login moves the cursor up a line.
 
 ## Files Recently Touched
 
@@ -39,6 +39,8 @@ Latest user feedback: maximize/restore now works. Lynx works on some pages, but 
 * Windows PuTTY now sets `CONF_line_codepage` to `UTF-8` by default for Mosh sessions before fonts and terminal unicode tables are initialised, but only if the user did not explicitly configure a line codepage.
 * Receive-side Mosh transport now reassembles multi-fragment server instructions before zlib/protobuf decode. Previously only single final fragments decoded, so larger screen frames could be treated as bad packets, leaving the old screen visible while input continued.
 * Fragment reassembly is held in `cmosh_transport_state`; `cmosh_client_recv_packet` now returns `CMOSH_CLIENT_RECV_PENDING` while waiting for remaining fragments and does not ACK a server state until the full instruction is decoded/applied.
+* Fragment assembly is now cleared if a malformed/conflicting fragment arrives or if a complete single-fragment packet arrives while an old partial assembly is pending. This avoids stale fragment state poisoning later receives.
+* `cmosh_client_make_input` now validates/encodes input before appending it to the retransmission queue, and rejects chunks larger than `CMOSH_CLIENT_INPUT_CHUNK_MAX`. PuTTY Mosh splits larger backend sends into protocol-sized input packets.
 
 ## Protocol Invariants
 
@@ -67,15 +69,17 @@ Latest user feedback: maximize/restore now works. Lynx works on some pages, but 
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after receive-side transport fragment reassembly.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after receive-side transport fragment reassembly.
 * Latest `cmake --build build --target putty --config Debug` passed after receive-side transport fragment reassembly.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after fragment-state cleanup and input chunk hardening.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after fragment-state cleanup and input chunk hardening.
+* Latest `cmake --build build --target putty --config Debug` passed after fragment-state cleanup and input chunk hardening.
 
 ## Known Issues
 
 * Full terminal correctness is not complete; output still depends on raw host-output decoding instead of a full Mosh terminal-state model.
 * High-latency or lossy links may still show repeated characters; throwaway handling and resize retransmission are only mitigations.
 * Sleep/wake and interface changes may still need deeper UDP reopen or retransmission timer work.
-* Lynx/emoji-heavy pages need user retesting with `build\Debug\putty.exe` after the receive-side fragment reassembly build.
 * Up-arrow-after-login issue still needs investigation if it persists after the UTF-8/default rebuild; likely candidates are startup tty modes or local line discipline state before UDP readiness.
 
 ## Exact Next Step
 
-Run `build\Debug\putty.exe` and retest Lynx on the emoji-heavy/forum page. If it still freezes, check the PuTTY Event Log for the "no raw host-output bytes" diagnostic; if state-only output appears, prioritize implementing the real Mosh terminal-state renderer over further raw-output fixes.
+Retest with `build\Debug\putty.exe` on a high-latency/lossy connection, especially paste bursts and rapid command-history navigation immediately after login. If repeated characters persist, inspect the server ACK/throwaway progression and retransmission timing next.

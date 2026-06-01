@@ -767,6 +767,7 @@ static void mosh_send(Backend *be, const char *buf, size_t len)
     Mosh *mosh = container_of(be, Mosh, backend);
     unsigned char packet[CMOSH_MAX_PACKET];
     size_t packet_len = 0;
+    size_t pos = 0;
     uint64_t now;
 
     if (!mosh->udp_ready || mosh->shutdown || !len)
@@ -779,10 +780,21 @@ static void mosh_send(Backend *be, const char *buf, size_t len)
     }
 
     now = (uint64_t)GETTICKCOUNT();
-    if (cmosh_client_make_input(&mosh->client, (const unsigned char *)buf,
-                                len, now, mosh_now16((unsigned long)now),
-                                packet, sizeof(packet), &packet_len) == 0)
+    while (pos < len) {
+        size_t chunk = len - pos;
+
+        if (chunk > CMOSH_CLIENT_INPUT_CHUNK_MAX)
+            chunk = CMOSH_CLIENT_INPUT_CHUNK_MAX;
+        if (cmosh_client_make_input(&mosh->client,
+                                    (const unsigned char *)buf + pos,
+                                    chunk, now,
+                                    mosh_now16((unsigned long)now),
+                                    packet, sizeof(packet),
+                                    &packet_len) != 0)
+            return;
         mosh_udp_send(mosh, packet, packet_len);
+        pos += chunk;
+    }
 }
 
 static size_t mosh_sendbuffer(Backend *be)

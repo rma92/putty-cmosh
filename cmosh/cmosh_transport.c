@@ -257,10 +257,13 @@ int cmosh_transport_decode_packet_state(
         return -1;
     *timestamp = ((unsigned)plain[0] << 8) | plain[1];
     *echo_timestamp = ((unsigned)plain[2] << 8) | plain[3];
-    if (cmosh_decode_fragment(plain + 4, plain_len - 4, &frag) != 0)
+    if (cmosh_decode_fragment(plain + 4, plain_len - 4, &frag) != 0) {
+        cmosh_transport_clear(st);
         return -1;
+    }
 
     if (frag.index == 0 && frag.final) {
+        cmosh_transport_clear(st);
         return cmosh_transport_decode_instruction(frag.payload,
                                                   frag.payload_len, ti,
                                                   diff_buf, diff_buf_len);
@@ -269,6 +272,8 @@ int cmosh_transport_decode_packet_state(
     ret = cmosh_transport_reassemble_fragment(st, &frag, assembled,
                                               sizeof(assembled),
                                               &assembled_len);
+    if (ret < 0)
+        cmosh_transport_clear(st);
     if (ret != 0)
         return ret;
     return cmosh_transport_decode_instruction(assembled, assembled_len, ti,
