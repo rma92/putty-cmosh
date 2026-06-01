@@ -242,6 +242,28 @@ int cmosh_client_make_idle_event(struct cmosh_client *client, uint64_t now_ms,
     return 0;
 }
 
+void cmosh_client_note_input_send_failed(struct cmosh_client *client,
+                                         uint64_t state, uint64_t now_ms)
+{
+    size_t i;
+
+    if (!client || state <= client->input.acked)
+        return;
+    for (i = 0; i < client->input.nrecords; i++) {
+        struct cmosh_input_record *rec = &client->input.records[i];
+        uint64_t retry_ms;
+
+        if (rec->state != state)
+            continue;
+        if (rec->send_count)
+            rec->send_count--;
+        retry_ms = rec->send_count < 2 ?
+            CMOSH_INPUT_RETRY_FIRST_MS : CMOSH_INPUT_RETRY_LATER_MS;
+        rec->last_sent_ms = now_ms >= retry_ms ? now_ms - retry_ms : 0;
+        return;
+    }
+}
+
 enum cmosh_client_recv_result cmosh_client_recv_packet(
     struct cmosh_client *client, const unsigned char *packet,
     size_t packet_len, struct cmosh_transport_instruction *ti,

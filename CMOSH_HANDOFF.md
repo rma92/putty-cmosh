@@ -11,12 +11,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * `cmosh/cmosh_client.c`
 * `cmosh/cmosh_client.h`
 * `cmosh/cmosh_session.c`
-* `cmosh/cmosh_session.h`
 * `cmosh/cmosh_platform.c`
-* `cmosh/cmosh_proto.c`
-* `cmosh/cmosh_proto.h`
 * `cmosh/cmosh_test.c`
-* `cmosh/cmosh_transport.c`
 * `otherbackends/mosh.c`
 * `windows/window.c`
 * `AGENTS.md`
@@ -50,11 +46,15 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Idle/retransmit events now expose input retransmit diagnostics: retransmitted state number, acked/current input state, queued record count, and queued byte count. PuTTY logs these at most every 5 seconds while retransmitting.
 * Receive events now expose server `ack_num`/`throwaway_num` plus input queue before/after counters. PuTTY logs throttled Event Log diagnostics when server ACK/throwaway trims queued input, making repeated-character reports easier to correlate with retransmits.
 * Standalone `cmosh` treats transient UDP send failures during the established session loop (`would block`, buffer exhaustion, reset/refused, host/network unreachable) as retryable instead of exiting after input/resize state has already entered the retransmission queue.
+* If standalone `cmosh` sees a transient UDP send failure for an input, resize, or retransmitted input-state packet, it rolls back that record's send count and makes it immediately eligible for retransmission. This avoids local `ENOBUFS`/would-block delaying the next retry by the normal input retransmit interval.
+* Native PuTTY Mosh now caches the exact initial encrypted association probe and resends those same bytes once per second until the first authenticated UDP packet arrives. Do not regenerate this packet for retries; it uses the same transport nonce.
 
 ## Protocol Invariants
 
 * Do not retransmit input already acknowledged or thrown away by the server.
 * Do not advance local send sequence, input state, or retransmit timestamps for a packet that was not successfully encoded for sending.
+* If a packet was encoded but definitely not sent because of a transient local UDP error, queued input must remain owned by the client and should become retryable immediately.
+* Repeated Mosh association probes must reuse the exact original encrypted packet bytes, not re-encrypt changed plaintext with the same nonce.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
@@ -93,6 +93,9 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after receive ACK/throwaway diagnostics and transient standalone UDP send handling.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after receive ACK/throwaway diagnostics and transient standalone UDP send handling.
 * Latest `cmake --build build --target putty --config Debug` passed after receive ACK/throwaway diagnostics and transient standalone UDP send handling.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after transient-send retransmit rollback.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after transient-send retransmit rollback.
+* Latest `cmake --build build --target putty --config Debug` passed after PuTTY association probe retries.
 
 ## Known Issues
 
@@ -103,4 +106,4 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 
 ## Exact Next Step
 
-Retest with `build\Debug\putty.exe` on a high-latency/lossy connection, especially paste bursts, sleep/wake, and rapid command-history navigation immediately after login. If repeated characters persist, compare Event Log retransmit lines against the new `Mosh server input ACK ...` lines to see whether repeats occur before the server ACK/throwaway transition or after already-trimmed input state.
+Retest with `build\Debug\putty.exe` on a high-latency/lossy connection, especially startup UDP establishment, paste bursts, sleep/wake, and rapid command-history navigation immediately after login. If repeated characters persist, compare Event Log retransmit lines against the new `Mosh server input ACK ...` lines to see whether repeats occur before the server ACK/throwaway transition or after already-trimmed input state.

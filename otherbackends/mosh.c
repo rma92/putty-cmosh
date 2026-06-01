@@ -15,6 +15,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#define MOSH_ASSOC_RETRY_MS 1000U
+
 typedef struct Mosh Mosh;
 
 struct Mosh {
@@ -30,6 +32,8 @@ struct Mosh {
     Socket *udp_socket;
     struct cmosh_client client;
     struct cmosh_transport_state bootstrap_transport;
+    unsigned char initial_packet[CMOSH_MAX_PACKET];
+    size_t initial_packet_len;
     strbuf *bootstrap_output;
     strbuf *pending_input;
     struct cmosh_bootstrap bootstrap;
@@ -40,6 +44,7 @@ struct Mosh {
     char *ssh_host;
     unsigned int cols, rows;
     int exitcode;
+    uint64_t last_assoc_probe_ms;
     uint64_t last_input_diag_ms;
     uint64_t last_recv_diag_ms;
     bool udp_started;
@@ -250,6 +255,18 @@ static void mosh_send_idle(Mosh *mosh, unsigned long now)
     mosh_try_send_pending(mosh);
 }
 
+static void mosh_send_assoc_probe(Mosh *mosh, unsigned long now)
+{
+    if (!mosh->udp_started || mosh->udp_ready || mosh->shutdown ||
+        !mosh->udp_socket || !mosh->initial_packet_len)
+        return;
+    if (mosh->last_assoc_probe_ms &&
+        (uint64_t)now - mosh->last_assoc_probe_ms < MOSH_ASSOC_RETRY_MS)
+        return;
+    mosh_udp_send(mosh, mosh->initial_packet, mosh->initial_packet_len);
+    mosh->last_assoc_probe_ms = (uint64_t)now;
+}
+
 static void mosh_send_ack(Mosh *mosh, unsigned long now)
 {
     unsigned char packet[CMOSH_MAX_PACKET];
@@ -266,6 +283,7 @@ static void mosh_timer(void *ctx, unsigned long now)
 {
     Mosh *mosh = (Mosh *)ctx;
 
+    mosh_send_assoc_probe(mosh, now);
     mosh_send_idle(mosh, now);
     if (mosh->udp_socket && !mosh->shutdown)
         schedule_timer(100, mosh_timer, mosh);
@@ -487,7 +505,10 @@ static bool mosh_start_udp(Mosh *mosh)
         return false;
     }
 
+    memcpy(mosh->initial_packet, packet, packet_len);
+    mosh->initial_packet_len = packet_len;
     mosh_udp_send(mosh, packet, packet_len);
+    mosh->last_assoc_probe_ms = (uint64_t)GETTICKCOUNT();
     schedule_timer(100, mosh_timer, mosh);
 
     if (mosh->ssh_backend) {

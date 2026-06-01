@@ -105,6 +105,8 @@ struct cmosh_input_record *cmosh_input_retransmit_record(
 
         if (rec->state <= st->acked)
             continue;
+        if (rec->send_count == 0)
+            return rec;
         if (age >= retry_ms)
             return rec;
     }
