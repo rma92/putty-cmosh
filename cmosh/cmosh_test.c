@@ -871,6 +871,36 @@ static void test_client(void)
 
     cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 10,
                       0, 6);
+    check(cmosh_client_make_input(&client, (const unsigned char *)"x", 1,
+                                  100, 0x5100, packet, sizeof(packet),
+                                  &n) == 0 &&
+              cmosh_client_make_input(&client, (const unsigned char *)"y",
+                                      1, 101, 0x5101, packet,
+                                      sizeof(packet), &n) == 0,
+          "client process ack setup");
+    check(make_test_transport_packet(key, 11, 5, 5, 2, 3, NULL, 0,
+                                     0x5111, packet, sizeof(packet), &n) == 0,
+          "client process ack packet source");
+    {
+        struct cmosh_client_recv_event event;
+        check(cmosh_client_process_packet(
+                  &client, packet, n, diff, sizeof(diff),
+                  test_output_callback, &sink, &event) ==
+                  CMOSH_CLIENT_RECV_OK &&
+              event.ack_num == 2 && event.throwaway_num == 3 &&
+              event.input_acked_before == 1 &&
+              event.input_acked_after == 3 &&
+              event.input_current == 3 &&
+              event.input_records_before == 2 &&
+              event.input_records_after == 0 &&
+              event.input_bytes_before == 2 &&
+              event.input_bytes_after == 0 &&
+              client.input.acked == 3 && client.input.nrecords == 0,
+              "client process reports input ack transition");
+    }
+
+    cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 10,
+                      0, 6);
     memset(&sink, 0, sizeof(sink));
     check(cmosh_transport_make_packet(key, 11, 5, 6, 1,
                                       (const unsigned char *)"q", 1, 0x5555,

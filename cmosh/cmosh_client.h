@@ -45,7 +45,15 @@ struct cmosh_client_recv_event {
     uint64_t old_num;
     uint64_t new_num;
     uint64_t ack_num;
+    uint64_t throwaway_num;
     uint64_t previous_server_state;
+    uint64_t input_acked_before;
+    uint64_t input_acked_after;
+    uint64_t input_current;
+    size_t input_records_before;
+    size_t input_records_after;
+    size_t input_bytes_before;
+    size_t input_bytes_after;
     size_t diff_len;
     int queued_future;
     int server_shutdown;

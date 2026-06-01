@@ -41,6 +41,7 @@ struct Mosh {
     unsigned int cols, rows;
     int exitcode;
     uint64_t last_input_diag_ms;
+    uint64_t last_recv_diag_ms;
     bool udp_started;
     bool udp_start_queued;
     bool udp_ready;
@@ -357,6 +358,28 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
         seat_notify_remote_exit(mosh->seat);
         seat_notify_remote_disconnect(mosh->seat);
         return;
+    }
+
+    if ((event.throwaway_num > event.ack_num ||
+         (event.input_records_before &&
+          event.input_acked_after > event.input_acked_before)) &&
+        (uint64_t)GETTICKCOUNT() - mosh->last_recv_diag_ms >= 5000U) {
+        char msg[224];
+        snprintf(msg, sizeof(msg),
+                 "Mosh server input ACK ack=%llu throwaway=%llu "
+                 "input_acked=%llu->%llu current=%llu queued=%u->%u "
+                 "bytes=%u->%u",
+                 (unsigned long long)event.ack_num,
+                 (unsigned long long)event.throwaway_num,
+                 (unsigned long long)event.input_acked_before,
+                 (unsigned long long)event.input_acked_after,
+                 (unsigned long long)event.input_current,
+                 (unsigned)event.input_records_before,
+                 (unsigned)event.input_records_after,
+                 (unsigned)event.input_bytes_before,
+                 (unsigned)event.input_bytes_after);
+        logevent(mosh->logctx, msg);
+        mosh->last_recv_diag_ms = (uint64_t)GETTICKCOUNT();
     }
 
     if (event.should_ack)

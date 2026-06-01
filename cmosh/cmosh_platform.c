@@ -51,6 +51,33 @@ static int cmosh_socket_valid(cmosh_socket_t s)
     return s != INVALID_SOCKET;
 }
 
+static int cmosh_udp_send_error_transient(void)
+{
+#ifdef _WIN32
+    int err = WSAGetLastError();
+    return err == WSAEWOULDBLOCK || err == WSAENOBUFS ||
+           err == WSAECONNRESET || err == WSAENETRESET ||
+           err == WSAEHOSTUNREACH || err == WSAENETUNREACH;
+#else
+    return errno == EWOULDBLOCK || errno == EAGAIN || errno == ENOBUFS ||
+           errno == ECONNREFUSED || errno == ECONNRESET ||
+           errno == EHOSTUNREACH || errno == ENETUNREACH;
+#endif
+}
+
+static int cmosh_udp_send_packet(cmosh_socket_t s, const unsigned char *packet,
+                                 size_t packet_len, int verbose)
+{
+    if (send(s, (const char *)packet, (int)packet_len, 0) != SOCKET_ERROR)
+        return 0;
+    if (cmosh_udp_send_error_transient()) {
+        if (verbose)
+            fputs("cmosh: transient UDP send error; will retry\n", stderr);
+        return 1;
+    }
+    return -1;
+}
+
 void cmosh_console_setup(void)
 {
 #ifdef _WIN32
@@ -658,8 +685,8 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                         now_ms, cmosh_now16_ms(), packet,
                                         sizeof(packet), &packet_len) != 0)
                                     goto out_socket;
-                                if (send(s, (const char *)packet,
-                                         (int)packet_len, 0) == SOCKET_ERROR)
+                                if (cmosh_udp_send_packet(
+                                        s, packet, packet_len, verbose) < 0)
                                     goto out_socket;
                                 last_cols = cur_cols;
                                 last_rows = cur_rows;
@@ -688,8 +715,8 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                         cmosh_now16_ms(), packet,
                                         sizeof(packet), &packet_len) != 0)
                                     goto out_socket;
-                                if (send(s, (const char *)packet,
-                                         (int)packet_len, 0) == SOCKET_ERROR)
+                                if (cmosh_udp_send_packet(
+                                        s, packet, packet_len, verbose) < 0)
                                     goto out_socket;
                                 sent = 1;
                                 if (verbose) {
@@ -749,9 +776,9 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                 packet, sizeof(packet),
                                                 &packet_len) != 0)
                                             goto out_socket;
-                                        if (send(s, (const char *)packet,
-                                                 (int)packet_len, 0) ==
-                                            SOCKET_ERROR)
+                                        if (cmosh_udp_send_packet(
+                                                s, packet, packet_len,
+                                                verbose) < 0)
                                             goto out_socket;
                                         continue;
                                     }
@@ -783,6 +810,9 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                         fprintf(stderr,
                                                 "cmosh: loop recv seq=%llu "
                                                 "old=%llu new=%llu ack=%llu "
+                                                "throwaway=%llu "
+                                                "input_acked=%llu->%llu "
+                                                "queued=%u->%u bytes=%u->%u "
                                                 "diff=%u\n",
                                                 (unsigned long long)seq,
                                                 (unsigned long long)
@@ -791,6 +821,20 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                     event.new_num,
                                                 (unsigned long long)
                                                     event.ack_num,
+                                                (unsigned long long)
+                                                    event.throwaway_num,
+                                                (unsigned long long)
+                                                    event.input_acked_before,
+                                                (unsigned long long)
+                                                    event.input_acked_after,
+                                                (unsigned)
+                                                    event.input_records_before,
+                                                (unsigned)
+                                                    event.input_records_after,
+                                                (unsigned)
+                                                    event.input_bytes_before,
+                                                (unsigned)
+                                                    event.input_bytes_after,
                                                 (unsigned)event.diff_len);
                                     if (event.server_shutdown) {
                                         if (verbose)
@@ -805,9 +849,9 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                 packet, sizeof(packet),
                                                 &packet_len) != 0)
                                             goto out_socket;
-                                        if (send(s, (const char *)packet,
-                                                 (int)packet_len, 0) ==
-                                            SOCKET_ERROR)
+                                        if (cmosh_udp_send_packet(
+                                                s, packet, packet_len,
+                                                verbose) < 0)
                                             goto out_socket;
                                     }
                                 }
@@ -844,8 +888,9 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                  1000U));
                                 }
                                 if (packet_len &&
-                                    send(s, (const char *)packet,
-                                         (int)packet_len, 0) == SOCKET_ERROR)
+                                    cmosh_udp_send_packet(s, packet,
+                                                          packet_len,
+                                                          verbose) < 0)
                                     goto out_socket;
                                 if (packet_len && verbose) {
                                     fprintf(stderr,

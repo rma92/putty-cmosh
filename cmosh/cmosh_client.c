@@ -279,10 +279,17 @@ enum cmosh_client_recv_result cmosh_client_process_packet(
     enum cmosh_client_recv_result result;
     unsigned int timestamp;
     uint64_t seq, previous_server_state = 0;
+    uint64_t input_acked_before = 0;
+    size_t input_records_before = 0, input_bytes_before = 0;
     int queued_future = 0;
 
     if (event)
         memset(event, 0, sizeof(*event));
+    if (client) {
+        input_acked_before = client->input.acked;
+        input_records_before = client->input.nrecords;
+        input_bytes_before = client->input.bytes_len;
+    }
     memset(&ti, 0, sizeof(ti));
     result = cmosh_client_recv_packet(client, packet, packet_len, &ti,
                                       diff_buf, diff_buf_len, &timestamp,
@@ -293,6 +300,16 @@ enum cmosh_client_recv_result cmosh_client_process_packet(
         event->old_num = ti.old_num;
         event->new_num = ti.new_num;
         event->ack_num = ti.ack_num;
+        event->throwaway_num = ti.throwaway_num;
+        event->input_acked_before = input_acked_before;
+        if (client) {
+            event->input_acked_after = client->input.acked;
+            event->input_current = client->input.current;
+            event->input_records_after = client->input.nrecords;
+            event->input_bytes_after = client->input.bytes_len;
+        }
+        event->input_records_before = input_records_before;
+        event->input_bytes_before = input_bytes_before;
         event->diff_len = ti.diff_len;
     }
     if (result != CMOSH_CLIENT_RECV_OK)

@@ -48,12 +48,15 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * PuTTY Mosh now owns accepted terminal input in a backend-side pending buffer until it is successfully packetized into cmosh input states. This prevents large paste bursts from being partially dropped when the retransmission queue fills.
 * PuTTY Mosh stores its `Ldisc` pointer and calls `ldisc_check_sendok()` after UDP becomes ready and after received ACKs free input queue capacity.
 * Idle/retransmit events now expose input retransmit diagnostics: retransmitted state number, acked/current input state, queued record count, and queued byte count. PuTTY logs these at most every 5 seconds while retransmitting.
+* Receive events now expose server `ack_num`/`throwaway_num` plus input queue before/after counters. PuTTY logs throttled Event Log diagnostics when server ACK/throwaway trims queued input, making repeated-character reports easier to correlate with retransmits.
+* Standalone `cmosh` treats transient UDP send failures during the established session loop (`would block`, buffer exhaustion, reset/refused, host/network unreachable) as retryable instead of exiting after input/resize state has already entered the retransmission queue.
 
 ## Protocol Invariants
 
 * Do not retransmit input already acknowledged or thrown away by the server.
 * Do not advance local send sequence, input state, or retransmit timestamps for a packet that was not successfully encoded for sending.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
+* Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
 * Do not trust network input; validate packet lengths and state transitions before use.
 * Preserve behavior of non-Mosh PuTTY backends.
@@ -87,6 +90,9 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target putty --config Debug` passed after PuTTY pending-input buffering and retransmit diagnostics.
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after retransmit diagnostic fields.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after retransmit diagnostic fields.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after receive ACK/throwaway diagnostics and transient standalone UDP send handling.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after receive ACK/throwaway diagnostics and transient standalone UDP send handling.
+* Latest `cmake --build build --target putty --config Debug` passed after receive ACK/throwaway diagnostics and transient standalone UDP send handling.
 
 ## Known Issues
 
@@ -97,4 +103,4 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 
 ## Exact Next Step
 
-Retest with `build\Debug\putty.exe` on a high-latency/lossy connection, especially paste bursts, sleep/wake, and rapid command-history navigation immediately after login. If repeated characters persist, compare Event Log retransmit diagnostics against server `ack_num`/`throwaway_num`; next code step is to include ACK/throwaway transitions in receive diagnostics if needed.
+Retest with `build\Debug\putty.exe` on a high-latency/lossy connection, especially paste bursts, sleep/wake, and rapid command-history navigation immediately after login. If repeated characters persist, compare Event Log retransmit lines against the new `Mosh server input ACK ...` lines to see whether repeats occur before the server ACK/throwaway transition or after already-trimmed input state.
