@@ -994,6 +994,33 @@ static void test_client(void)
               ti.old_num == 10 && ti.new_num == 11 &&
               ti.ack_num == 20 && ti.diff_len == 7,
           "client input packet fields");
+    {
+        struct cmosh_client_idle_event idle_event;
+        size_t input_diff_len = ti.diff_len;
+        unsigned char input_diff[32];
+
+        memcpy(input_diff, diff, input_diff_len);
+        check(client.input.bytes_len == input_diff_len,
+              "client stores encoded input diff");
+        check(cmosh_client_make_idle_event(
+                  &client, 100 + CMOSH_INPUT_RETRY_FIRST_MS, 0x3444, packet,
+                  sizeof(packet), &n, &idle_event) == 0 &&
+                  idle_event.retransmitted &&
+                  idle_event.retransmit_state == 11 &&
+                  idle_event.input_acked == 10 &&
+                  idle_event.input_current == 11 &&
+                  idle_event.input_records == 1 &&
+                  idle_event.input_bytes == input_diff_len,
+              "client input retransmit due");
+        memset(&ti, 0, sizeof(ti));
+        check(cmosh_transport_decode_packet(key, packet, n, &ti, diff,
+                                            sizeof(diff), &timestamp,
+                                            &timestamp, &seq) == 0 &&
+                  ti.old_num == 10 && ti.new_num == 11 &&
+                  ti.diff_len == input_diff_len &&
+                  memcmp(diff, input_diff, input_diff_len) == 0,
+              "client input retransmits same diff");
+    }
 
     check(make_test_transport_packet(key, 8, 20, 20, 10, 11, NULL, 0,
                                      0x3888, packet, sizeof(packet), &n) == 0,
@@ -1181,7 +1208,7 @@ static void test_client(void)
               event.input_current == 3 &&
               event.input_records_before == 2 &&
               event.input_records_after == 0 &&
-              event.input_bytes_before == 2 &&
+              event.input_bytes_before == 14 &&
               event.input_bytes_after == 0 &&
               client.input.acked == 3 && client.input.nrecords == 0,
               "client process reports input ack transition");

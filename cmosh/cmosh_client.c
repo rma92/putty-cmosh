@@ -127,7 +127,7 @@ int cmosh_client_make_input(struct cmosh_client *client,
     if (cmosh_encode_user_keystroke_message(keys, keys_len, diff,
                                             sizeof(diff), &diff_len) != 0)
         return -1;
-    if (!cmosh_client_input_has_room(client, keys_len))
+    if (!cmosh_client_input_has_room(client, diff_len))
         return -1;
     old_client_state = client->input.current;
     ret = cmosh_transport_make_packet(
@@ -136,7 +136,7 @@ int cmosh_client_make_input(struct cmosh_client *client,
         client->echo_timestamp, packet, packet_cap, packet_len);
     if (ret != 0)
         return ret;
-    if (cmosh_input_append(&client->input, keys, keys_len, now_ms) != 0)
+    if (cmosh_input_append_diff(&client->input, diff, diff_len, now_ms) != 0)
         return -1;
     client->send_seq++;
     return 0;

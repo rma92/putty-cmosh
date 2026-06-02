@@ -694,6 +694,8 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
         {
             struct cmosh_client client;
             unsigned int last_cols = cols, last_rows = rows;
+            unsigned char pending_input[CMOSH_INPUT_MAX_BYTES];
+            size_t pending_input_len = 0;
             int idle = 0;
 
                         cmosh_client_init(&client, key, ti.ack_num,
@@ -714,62 +716,98 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                 if (cmosh_client_make_resize(
                                         &client, cur_cols, cur_rows,
                                         now_ms, cmosh_now16_ms(), packet,
-                                        sizeof(packet), &packet_len) != 0)
-                                    goto out_socket;
-                                send_result = cmosh_udp_send_packet(
-                                    s, packet, packet_len, verbose);
-                                if (send_result < 0)
-                                    goto out_socket;
-                                if (send_result > 0)
-                                    cmosh_client_note_input_send_failed(
-                                        &client, client.input.current, now_ms);
-                                last_cols = cur_cols;
-                                last_rows = cur_rows;
-                                sent = 1;
-                                if (verbose)
+                                        sizeof(packet), &packet_len) == 0) {
+                                    send_result = cmosh_udp_send_packet(
+                                        s, packet, packet_len, verbose);
+                                    if (send_result < 0)
+                                        goto out_socket;
+                                    if (send_result > 0)
+                                        cmosh_client_note_input_send_failed(
+                                            &client, client.input.current,
+                                            now_ms);
+                                    last_cols = cur_cols;
+                                    last_rows = cur_rows;
+                                    sent = 1;
+                                    if (verbose)
+                                        fprintf(stderr,
+                                                "cmosh: sent resize %ux%u "
+                                                "client state=%llu\n",
+                                                cur_cols, cur_rows,
+                                                (unsigned long long)
+                                                    client.input.current);
+                                } else if (verbose) {
                                     fprintf(stderr,
-                                            "cmosh: sent resize %ux%u "
-                                            "client state=%llu\n",
-                                            cur_cols, cur_rows,
-                                            (unsigned long long)
-                                                client.input.current);
+                                            "cmosh: deferring resize %ux%u; "
+                                            "input queue is full\n",
+                                            cur_cols, cur_rows);
+                                }
                             }
 
-                            cmosh_console_read(keys, sizeof(keys), &key_len);
-                            if (key_len &&
-                                cmosh_contains_exit_key(keys, key_len)) {
-                                if (verbose)
-                                    fputs("cmosh: local disconnect key\n",
-                                          stderr);
-                                rc = 0;
-                                goto out_socket;
-                            }
-                            if (key_len) {
-                                if (cmosh_client_make_input(
-                                        &client, keys, key_len, now_ms,
-                                        cmosh_now16_ms(), packet,
-                                        sizeof(packet), &packet_len) != 0)
+                            if (pending_input_len < sizeof(pending_input)) {
+                                size_t input_room =
+                                    sizeof(pending_input) - pending_input_len;
+
+                                if (input_room > sizeof(keys))
+                                    input_room = sizeof(keys);
+                                cmosh_console_read(keys, input_room, &key_len);
+                                if (key_len &&
+                                    cmosh_contains_exit_key(keys, key_len)) {
+                                    if (verbose)
+                                        fputs("cmosh: local disconnect key\n",
+                                              stderr);
+                                    rc = 0;
                                     goto out_socket;
+                                }
+                                if (key_len) {
+                                    memcpy(pending_input + pending_input_len,
+                                           keys, key_len);
+                                    pending_input_len += key_len;
+                                }
+                            }
+                            while (pending_input_len) {
+                                size_t chunk = pending_input_len;
+                                size_t consume;
+
+                                if (chunk > CMOSH_CLIENT_INPUT_CHUNK_MAX)
+                                    chunk = CMOSH_CLIENT_INPUT_CHUNK_MAX;
+                                while (chunk &&
+                                       cmosh_client_make_input(
+                                           &client, pending_input, chunk,
+                                           now_ms, cmosh_now16_ms(), packet,
+                                           sizeof(packet), &packet_len) != 0)
+                                    chunk /= 2;
+                                if (!chunk)
+                                    break;
+
                                 send_result = cmosh_udp_send_packet(
                                     s, packet, packet_len, verbose);
                                 if (send_result < 0)
                                     goto out_socket;
-                                if (send_result > 0)
+                                if (send_result > 0) {
                                     cmosh_client_note_input_send_failed(
                                         &client, client.input.current, now_ms);
+                                }
                                 sent = 1;
                                 if (verbose) {
                                     fprintf(stderr,
                                             "cmosh: sent %u input byte(s), "
                                             "client state=%llu acked=%llu\n",
-                                            (unsigned)key_len,
+                                            (unsigned)chunk,
                                             (unsigned long long)
                                                 client.input.current,
                                             (unsigned long long)
                                                 client.input.acked);
-                                    cmosh_dump_hex(stderr, "input bytes", keys,
-                                                   key_len);
+                                    cmosh_dump_hex(stderr, "input bytes",
+                                                   pending_input, chunk);
                                 }
+                                consume = chunk;
+                                pending_input_len -= consume;
+                                if (pending_input_len)
+                                    memmove(pending_input,
+                                            pending_input + consume,
+                                            pending_input_len);
+                                if (send_result > 0)
+                                    break;
                             }
 
                             for (;;) {

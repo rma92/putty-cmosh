@@ -114,6 +114,9 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Decoded transport instructions must match `CMOSH_PROTOCOL_VERSION` before client state, ACK trimming, or host output can be affected.
 * No-diff server-state transitions still advance state and commit retained ACK/throwaway metadata. Stale no-diff transitions must not advance server state, though their authenticated ACK/throwaway fields may still trim input after high-level validation.
 * Duplicate packet recovery must be able to apply queued no-diff transitions without requiring a host-output callback; requiring output would leave ACK-only metadata stuck behind duplicate replay.
+* Client input retransmission records now store the encoded user diff, not the raw key bytes. Queue capacity checks must use encoded diff length so packetized input and retained retransmission state agree.
+* PuTTY and standalone `cmosh` may shrink an input chunk when encoded-diff queue space is tight; unsent local bytes must remain pending instead of being dropped or turning queue pressure into a fatal disconnect.
+* Standalone `cmosh` resize attempts that cannot be packetized because the retransmission queue is full are deferred by leaving `last_cols`/`last_rows` unchanged; the resize will be retried after input ACKs free queue space.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
@@ -223,6 +226,10 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after duplicate no-diff queue-drain hardening.
 * Latest `cmake --build build --target putty --config Debug` passed after duplicate no-diff queue-drain hardening.
 * Latest `cmake --build build --target cmosh --config Debug` passed after duplicate no-diff queue-drain hardening.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after encoded-input retransmission and pending-input chunk shrinking.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after encoded-input retransmission and pending-input chunk shrinking.
+* Latest `cmake --build build --target cmosh --config Debug` passed after standalone pending-input/resize deferral hardening.
+* Latest `cmake --build build --target putty --config Debug` passed after PuTTY pending-input chunk shrinking.
 
 ## Known Issues
 

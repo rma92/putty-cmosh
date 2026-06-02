@@ -1075,12 +1075,15 @@ static void mosh_try_send_pending(Mosh *mosh)
             chunk = room;
         if (chunk > CMOSH_CLIENT_INPUT_CHUNK_MAX)
             chunk = CMOSH_CLIENT_INPUT_CHUNK_MAX;
-        if (cmosh_client_make_input(&mosh->client,
-                                    mosh->pending_input->u,
-                                    chunk, now,
-                                    mosh_now16((unsigned long)now),
-                                    packet, sizeof(packet),
-                                    &packet_len) != 0)
+        while (chunk &&
+               cmosh_client_make_input(&mosh->client,
+                                       mosh->pending_input->u,
+                                       chunk, now,
+                                       mosh_now16((unsigned long)now),
+                                       packet, sizeof(packet),
+                                       &packet_len) != 0)
+            chunk /= 2;
+        if (!chunk)
             return;
         if (!mosh_udp_send(mosh, packet, packet_len)) {
             cmosh_client_note_input_send_failed(
