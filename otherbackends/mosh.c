@@ -71,6 +71,22 @@ static void mosh_start_udp_callback(void *ctx);
 static void mosh_try_send_pending(Mosh *mosh);
 static bool mosh_sendok(Backend *be);
 
+static bool mosh_interval_due(uint64_t last_ms, unsigned long now_ms,
+                              unsigned interval_ms)
+{
+    uint64_t now64 = (uint64_t)now_ms;
+
+    if (!last_ms)
+        return true;
+    if (now64 >= last_ms)
+        return now64 - last_ms >= interval_ms;
+    if (sizeof(unsigned long) == 4 && last_ms <= UINT32_MAX &&
+        last_ms - now64 > UINT32_MAX / 2)
+        return (uint64_t)(uint32_t)((uint32_t)now_ms -
+                                    (uint32_t)last_ms) >= interval_ms;
+    return false;
+}
+
 static char *mosh_description(Interactor *itr)
 {
     Mosh *mosh = container_of(itr, Mosh, interactor);
@@ -217,9 +233,8 @@ static bool mosh_udp_send(Mosh *mosh, const unsigned char *packet,
     backlog = sk_write(mosh->udp_socket, packet, packet_len);
     if (backlog) {
         now = GETTICKCOUNT();
-        if (!mosh->last_udp_send_fail_log_ms ||
-            (uint64_t)now - mosh->last_udp_send_fail_log_ms >=
-                MOSH_UDP_SEND_FAIL_LOG_MS) {
+        if (mosh_interval_due(mosh->last_udp_send_fail_log_ms, now,
+                              MOSH_UDP_SEND_FAIL_LOG_MS)) {
             logevent(mosh->logctx,
                      "Mosh UDP send failed locally; packet will be retried "
                      "if it carries retransmittable state");
@@ -257,7 +272,7 @@ static void mosh_send_idle(Mosh *mosh, unsigned long now)
         mosh_reopen_udp_socket(mosh);
     }
     if (event.retransmitted &&
-        (uint64_t)now - mosh->last_input_diag_ms >= 5000U) {
+        mosh_interval_due(mosh->last_input_diag_ms, now, 5000U)) {
         char msg[192];
         snprintf(msg, sizeof(msg),
                  "Mosh retransmitting input state=%llu acked=%llu "
@@ -285,7 +300,8 @@ static void mosh_send_assoc_probe(Mosh *mosh, unsigned long now)
         !mosh->udp_socket || !mosh->initial_packet_len)
         return;
     if (mosh->last_assoc_probe_ms &&
-        (uint64_t)now - mosh->last_assoc_probe_ms < MOSH_ASSOC_RETRY_MS)
+        !mosh_interval_due(mosh->last_assoc_probe_ms, now,
+                           MOSH_ASSOC_RETRY_MS))
         return;
     if (mosh_udp_send(mosh, mosh->initial_packet, mosh->initial_packet_len))
         mosh->last_assoc_probe_ms = (uint64_t)now;
@@ -434,7 +450,7 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
     if ((event.throwaway_num > event.ack_num ||
          (event.input_records_before &&
           event.input_acked_after > event.input_acked_before)) &&
-        (uint64_t)GETTICKCOUNT() - mosh->last_recv_diag_ms >= 5000U) {
+        mosh_interval_due(mosh->last_recv_diag_ms, GETTICKCOUNT(), 5000U)) {
         char msg[224];
         snprintf(msg, sizeof(msg),
                  "Mosh server input ACK ack=%llu throwaway=%llu "

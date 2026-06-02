@@ -62,6 +62,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * PuTTY pending-input draining now stops after the first local UDP send failure. The chunk already accepted by cmosh remains in the retransmission queue, but later bytes stay in `pending_input` so backend backpressure is visible during local buffer exhaustion or interface loss.
 * Core retransmit/diagnostic timers now treat backwards time as "not due yet" instead of unsigned-underflowing into immediate retransmit, missing-state, or UDP-timeout events. This covers tick wrap or clock regressions from platform timer sources.
 * Receive replay history is now committed only after a decrypted packet has passed the relevant payload validation. A malformed packet with a fresh sequence no longer poisons the replay window and blocks a later valid packet using that same sequence.
+* Native PuTTY Mosh backend diagnostic/probe throttles now use a local interval helper instead of raw `(uint64_t)now - last` arithmetic. This avoids log/probe storms on backwards time while preserving normal 32-bit tick wrap behavior.
+* Stateful cmosh server receive now rejects packets outside the server nonce space before replay-history lookup or fragment/state mutation. Reflected client-side datagrams can no longer be consumed as server updates.
 
 ## Protocol Invariants
 
@@ -77,6 +79,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * If local UDP sending is failing, do not continue draining the PuTTY-side pending-input buffer into more cmosh states in the same loop; stop after the failed datagram and let normal retry/backpressure resume.
 * Do not use unsigned elapsed-time subtraction unless the current timestamp is known to be at least the stored timestamp; backwards time is not evidence that retransmit or timeout is due.
 * Do not add a received sequence to replay history until the decrypted packet is structurally valid enough to be consumed. Partial fragments are recorded after a valid fragment is accepted into assembly.
+* Stateful client receive only accepts server nonce-space packets. Reflected client packets must not affect replay, fragment reassembly, ACK, or terminal state.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
@@ -133,6 +136,9 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after backwards-time guards and replay-history validation hardening.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after backwards-time guards and replay-history validation hardening.
 * Latest `cmake --build build --target putty --config Debug` passed after backwards-time guards and replay-history validation hardening.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after backend timer-throttle and server nonce-space hardening.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after backend timer-throttle and server nonce-space hardening.
+* Latest `cmake --build build --target putty --config Debug` passed after backend timer-throttle and server nonce-space hardening.
 
 ## Known Issues
 

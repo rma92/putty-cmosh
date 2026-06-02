@@ -391,12 +391,12 @@ static void test_transport(void)
 
         cmosh_transport_init(&st);
         check(cmosh_transport_encrypt_packet(
-                  key, CMOSH_CLIENT_NONCE_BASE | 13,
+                  key, CMOSH_SERVER_NONCE_BASE | 13,
                   (const unsigned char *)"", 0, malformed,
                   sizeof(malformed), &n) != 0,
               "transport rejects undersized malformed packet buffer");
         check(cmosh_transport_encrypt_packet(
-                  key, CMOSH_CLIENT_NONCE_BASE | 13,
+                  key, CMOSH_SERVER_NONCE_BASE | 13,
                   (const unsigned char *)"", 0, packet,
                   sizeof(packet), &n) == 0,
               "transport encrypt malformed packet");
@@ -404,9 +404,10 @@ static void test_transport(void)
                   &st, key, packet, n, &ti, diff_copy, sizeof(diff_copy),
                   &timestamp, &echo_timestamp, &seq) < 0,
               "transport rejects malformed packet without recording seq");
-        check(cmosh_transport_make_packet(key, 13, 4, 5, 6, diff,
-                                          sizeof(diff), 0x1234, 0x5678,
-                                          packet, sizeof(packet), &n) == 0,
+        check(cmosh_transport_make_packet(
+                  key, CMOSH_SERVER_NONCE_BASE | 13, 4, 5, 6, diff,
+                  sizeof(diff), 0x1234, 0x5678, packet, sizeof(packet),
+                  &n) == 0,
               "transport make valid packet after malformed same seq");
         memset(&ti, 0, sizeof(ti));
         check(cmosh_transport_decode_packet_state(
@@ -415,6 +416,28 @@ static void test_transport(void)
                   ti.old_num == 4 && ti.new_num == 5 &&
                   ti.ack_num == 6,
               "transport accepts valid packet after malformed same seq");
+        check(cmosh_transport_make_packet(
+                  key, CMOSH_CLIENT_NONCE_BASE | 14, 5, 6, 7, diff,
+                  sizeof(diff), 0x1234, 0x5678, packet, sizeof(packet),
+                  &n) == 0,
+              "transport make reflected client packet");
+        memset(&ti, 0, sizeof(ti));
+        check(cmosh_transport_decode_packet_state(
+                  &st, key, packet, n, &ti, diff_copy, sizeof(diff_copy),
+                  &timestamp, &echo_timestamp, &seq) < 0,
+              "transport rejects reflected client nonce");
+        check(cmosh_transport_make_packet(
+                  key, CMOSH_SERVER_NONCE_BASE | 14, 5, 6, 7, diff,
+                  sizeof(diff), 0x1234, 0x5678, packet, sizeof(packet),
+                  &n) == 0,
+              "transport make server packet after reflected client packet");
+        memset(&ti, 0, sizeof(ti));
+        check(cmosh_transport_decode_packet_state(
+                  &st, key, packet, n, &ti, diff_copy, sizeof(diff_copy),
+                  &timestamp, &echo_timestamp, &seq) == 0 &&
+                  ti.old_num == 5 && ti.new_num == 6 &&
+                  ti.ack_num == 7,
+              "transport accepts server packet after reflected client packet");
     }
 
     {
@@ -453,7 +476,7 @@ static void test_transport(void)
         memcpy(plain2 + 4, fragment, fragment_len);
         plain_len = fragment_len + 4;
         check(cmosh_transport_encrypt_packet(
-                  key, CMOSH_CLIENT_NONCE_BASE | 40, plain2, plain_len,
+                  key, CMOSH_SERVER_NONCE_BASE | 40, plain2, plain_len,
                   packet2, sizeof(packet2), &n) == 0,
               "encrypt first transport fragment");
         memset(&ti, 0, sizeof(ti));
@@ -461,7 +484,7 @@ static void test_transport(void)
             &st, key, packet2, n, &ti, diff_copy, sizeof(diff_copy),
             &timestamp, &echo_timestamp, &seq);
         check(decode_result == 1 &&
-                  seq == (CMOSH_CLIENT_NONCE_BASE | 40),
+                  seq == (CMOSH_SERVER_NONCE_BASE | 40),
               "transport waits for fragmented instruction");
 
         check(cmosh_encode_fragment(99, 1, 1, compressed + split,
@@ -471,7 +494,7 @@ static void test_transport(void)
         memcpy(plain2 + 4, fragment, fragment_len);
         plain_len = fragment_len + 4;
         check(cmosh_transport_encrypt_packet(
-                  key, CMOSH_CLIENT_NONCE_BASE | 41, plain2, plain_len,
+                  key, CMOSH_SERVER_NONCE_BASE | 41, plain2, plain_len,
                   packet2, sizeof(packet2), &n) == 0,
               "encrypt final transport fragment");
         memset(&ti, 0, sizeof(ti));
@@ -491,7 +514,7 @@ static void test_transport(void)
         memcpy(plain2 + 4, fragment, fragment_len);
         plain_len = fragment_len + 4;
         check(cmosh_transport_encrypt_packet(
-                  key, CMOSH_CLIENT_NONCE_BASE | 42, plain2, plain_len,
+                  key, CMOSH_SERVER_NONCE_BASE | 42, plain2, plain_len,
                   packet2, sizeof(packet2), &n) == 0,
               "encrypt stale first transport fragment");
         memset(&ti, 0, sizeof(ti));
@@ -499,9 +522,10 @@ static void test_transport(void)
                   &st, key, packet2, n, &ti, diff_copy,
                   sizeof(diff_copy), &timestamp, &echo_timestamp, &seq) == 1,
               "transport waits for stale fragment");
-        check(cmosh_transport_make_packet(key, 12, 5, 6, 7, fdiff,
-                                          sizeof(fdiff), 0x1234, 0x5678,
-                                          packet2, sizeof(packet2), &n) == 0,
+        check(cmosh_transport_make_packet(
+                  key, CMOSH_SERVER_NONCE_BASE | 12, 5, 6, 7, fdiff,
+                  sizeof(fdiff), 0x1234, 0x5678, packet2, sizeof(packet2),
+                  &n) == 0,
               "make complete packet after stale fragment");
         memset(&ti, 0, sizeof(ti));
         memset(diff_copy, 0, sizeof(diff_copy));
@@ -521,7 +545,7 @@ static void test_transport(void)
         memcpy(plain2 + 4, fragment, fragment_len);
         plain_len = fragment_len + 4;
         check(cmosh_transport_encrypt_packet(
-                  key, CMOSH_CLIENT_NONCE_BASE | 43, plain2, plain_len,
+                  key, CMOSH_SERVER_NONCE_BASE | 43, plain2, plain_len,
                   packet2, sizeof(packet2), &n) == 0,
               "encrypt conflict first transport fragment");
         memset(&ti, 0, sizeof(ti));
@@ -532,7 +556,7 @@ static void test_transport(void)
         fragment[10] ^= 1;
         memcpy(plain2 + 4, fragment, fragment_len);
         check(cmosh_transport_encrypt_packet(
-                  key, CMOSH_CLIENT_NONCE_BASE | 44, plain2, plain_len,
+                  key, CMOSH_SERVER_NONCE_BASE | 44, plain2, plain_len,
                   packet2, sizeof(packet2), &n) == 0,
               "encrypt conflicting transport fragment");
         memset(&ti, 0, sizeof(ti));
@@ -666,7 +690,7 @@ static int make_test_transport_packet(
     plain[3] = 0;
     memcpy(plain + 4, fragment, fragment_len);
     plain_len = fragment_len + 4;
-    return cmosh_transport_encrypt_packet(key, CMOSH_CLIENT_NONCE_BASE | seq,
+    return cmosh_transport_encrypt_packet(key, CMOSH_SERVER_NONCE_BASE | seq,
                                           plain, plain_len, packet,
                                           packet_cap, packet_len);
 }
@@ -834,7 +858,8 @@ static void test_client(void)
               client.input.acked == 12 && client.input.nrecords == 0,
           "client receive ack trims resize");
 
-    check(cmosh_transport_make_packet(key, 10, 20, 21, 12,
+    check(cmosh_transport_make_packet(key, CMOSH_SERVER_NONCE_BASE | 10,
+                                      20, 21, 12,
                                       (const unsigned char *)"h", 1, 0x4444,
                                       0, packet, sizeof(packet), &n) == 0,
           "client test server packet");
@@ -842,7 +867,7 @@ static void test_client(void)
     check(cmosh_client_recv_packet(&client, packet, n, &ti, diff,
                                    sizeof(diff), &timestamp, &seq) ==
               CMOSH_CLIENT_RECV_OK &&
-              seq == (CMOSH_CLIENT_NONCE_BASE | 10) &&
+              seq == (CMOSH_SERVER_NONCE_BASE | 10) &&
               client.input.acked == 12 &&
               client.echo_timestamp == 0x4444 && ti.diff_len == 1 &&
               diff[0] == 'h',
@@ -980,7 +1005,8 @@ static void test_client(void)
     cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 10,
                       0, 6);
     memset(&sink, 0, sizeof(sink));
-    check(cmosh_transport_make_packet(key, 11, 5, 6, 1,
+    check(cmosh_transport_make_packet(key, CMOSH_SERVER_NONCE_BASE | 11,
+                                      5, 6, 1,
                                       (const unsigned char *)"q", 1, 0x5555,
                                       0, packet, sizeof(packet), &n) == 0,
           "client process packet source");
@@ -990,7 +1016,7 @@ static void test_client(void)
                   &client, packet, n, diff, sizeof(diff),
                   test_output_callback, &sink, &event) ==
                   CMOSH_CLIENT_RECV_OK &&
-              event.seq == (CMOSH_CLIENT_NONCE_BASE | 11) &&
+              event.seq == (CMOSH_SERVER_NONCE_BASE | 11) &&
               event.old_num == 5 && event.new_num == 6 &&
               event.diff_len == 1 && event.should_ack &&
               !event.queued_future && !event.server_shutdown &&

@@ -265,6 +265,8 @@ int cmosh_transport_decode_packet_state(
     if (cmosh_transport_decrypt_packet(key, packet, packet_len, plain,
                                        sizeof(plain), &plain_len, seq) != 0)
         return -1;
+    if ((*seq & CMOSH_SERVER_NONCE_BASE) == 0)
+        return -1;
     if (cmosh_transport_seen_recv(st, *seq))
         return 2;
     if (plain_len < 4)
