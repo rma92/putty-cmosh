@@ -250,8 +250,10 @@ static void mosh_send_idle(Mosh *mosh, unsigned long now)
         logevent(mosh->logctx, msg);
         mosh->last_input_diag_ms = (uint64_t)now;
     }
-    if (packet_len)
-        mosh_udp_send(mosh, packet, packet_len);
+    if (packet_len && !mosh_udp_send(mosh, packet, packet_len) &&
+        event.retransmitted)
+        cmosh_client_note_input_send_failed(
+            &mosh->client, event.retransmit_state, (uint64_t)now);
     mosh_try_send_pending(mosh);
 }
 
@@ -877,7 +879,9 @@ static void mosh_try_send_pending(Mosh *mosh)
                                     packet, sizeof(packet),
                                     &packet_len) != 0)
             return;
-        mosh_udp_send(mosh, packet, packet_len);
+        if (!mosh_udp_send(mosh, packet, packet_len))
+            cmosh_client_note_input_send_failed(
+                &mosh->client, mosh->client.input.current, now);
         mosh_consume_pending_input(mosh, chunk);
     }
 }
@@ -924,8 +928,11 @@ static void mosh_size(Backend *be, int width, int height)
     now = GETTICKCOUNT();
     if (cmosh_client_make_resize(&mosh->client, mosh->cols, mosh->rows,
                                  (uint64_t)now, mosh_now16(now), packet,
-                                 sizeof(packet), &packet_len) == 0)
-        mosh_udp_send(mosh, packet, packet_len);
+                                 sizeof(packet), &packet_len) == 0) {
+        if (!mosh_udp_send(mosh, packet, packet_len))
+            cmosh_client_note_input_send_failed(
+                &mosh->client, mosh->client.input.current, (uint64_t)now);
+    }
 }
 
 static void mosh_special(Backend *be, SessionSpecialCode code, int arg)

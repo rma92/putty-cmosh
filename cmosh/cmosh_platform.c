@@ -562,10 +562,12 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
     {
         int attempt;
         for (attempt = 0; attempt < 5; attempt++) {
-            if (send(s, (const char *)packet, (int)packet_len, 0) ==
-                SOCKET_ERROR)
+            int send_result = cmosh_udp_send_packet(s, packet, packet_len,
+                                                    verbose);
+
+            if (send_result < 0)
                 goto out_socket;
-            if (verbose)
+            if (verbose && send_result == 0)
                 fprintf(stderr,
                         "cmosh: sent encrypted association probe #%d "
                         "(%u bytes, %u byte diff)\n",
@@ -616,14 +618,19 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
         unsigned int remote_ts = initial_ts;
         unsigned char post_ack_diff[CMOSH_SERVER_DIFF_MAX];
         unsigned int post_ack_ts, post_ack_echo_ts;
+        struct cmosh_transport_instruction initial_ti = ti;
+        uint64_t initial_seq_saved = seq;
+        int have_post_ack = 0;
+        int send_result;
 
         if (cmosh_client_make_start_ack(key, remote_ts, cmosh_now16_ms(),
                                         packet, sizeof(packet), &packet_len) !=
             0)
             goto out_socket;
-        if (send(s, (const char *)packet, (int)packet_len, 0) == SOCKET_ERROR)
+        send_result = cmosh_udp_send_packet(s, packet, packet_len, verbose);
+        if (send_result < 0)
             goto out_socket;
-        if (verbose)
+        if (verbose && send_result == 0)
             fprintf(stderr,
                     "cmosh: sent authenticated ACK for server state %llu "
                     "(%u bytes)\n",
@@ -655,16 +662,33 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                     if (verbose && ti.diff_len)
                         cmosh_dump_hex(stderr, "post-ACK diff", ti.diff,
                                        ti.diff_len);
-                    if (!verbose)
-                        cmosh_terminal_session_start();
-                    if (cmosh_decode_and_render_host(
-                            ti.diff, ti.diff_len, host_output,
-                            sizeof(host_output), verbose) != 0)
-                        goto out_socket;
-                    {
-                        struct cmosh_client client;
-                        unsigned int last_cols = cols, last_rows = rows;
-                        int idle = 0;
+                    have_post_ack = 1;
+            }
+        } else if (verbose) {
+            fputs("cmosh: no additional UDP response after ACK yet\n", stderr);
+        }
+        if (!have_post_ack) {
+            ti = initial_ti;
+            seq = initial_seq_saved;
+            if (ti.diff_len > sizeof(post_ack_diff))
+                goto out_socket;
+            memcpy(post_ack_diff, initial_diff, ti.diff_len);
+            post_ack_ts = initial_ts;
+            post_ack_echo_ts = initial_echo_ts;
+            ti.diff = post_ack_diff;
+            if (verbose)
+                fputs("cmosh: starting session from initial server state\n",
+                      stderr);
+        }
+        if (!verbose)
+            cmosh_terminal_session_start();
+        if (cmosh_decode_and_render_host(ti.diff, ti.diff_len, host_output,
+                                         sizeof(host_output), verbose) != 0)
+            goto out_socket;
+        {
+            struct cmosh_client client;
+            unsigned int last_cols = cols, last_rows = rows;
+            int idle = 0;
 
                         cmosh_client_init(&client, key, ti.ack_num,
                                           ti.new_num, seq, post_ack_ts, 3);
@@ -927,10 +951,6 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                             }
                         }
                     }
-            }
-        } else if (verbose) {
-            fputs("cmosh: no additional UDP response after ACK yet\n", stderr);
-        }
     }
     rc = 0;
 
