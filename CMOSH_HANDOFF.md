@@ -24,7 +24,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Treat UDP send/recv errors such as buffer exhaustion, connection reset, and host/network unreachable as transient where possible.
 * Redraw requests currently resend the current terminal size; this is not yet a real terminal-state replay.
 * On Windows, Reset Terminal and maximize/restore paths request a Mosh redraw via `backend_special(..., SS_NOP, 0)`.
-* On Mosh UDP timeout, the PuTTY backend attempts to reopen the UDP socket and keeps the old socket if reopen fails.
+* On Mosh UDP timeout, the PuTTY backend attempts to reopen the UDP socket and keeps the old socket if reopen fails. After a successful reopen it immediately sends an ACK on established sessions, or replays the cached association probe before UDP is established.
 * Resize updates are now recorded in the client input/retransmission queue as encoded diffs, so lost maximize/restore resize packets can be retransmitted before later input states.
 * Windows maximize/restore now uses the same terminal-resize predicate as ordinary WM_SIZE resize events: `RESIZE_TERM` or `RESIZE_EITHER` with Alt not pressed. Previously maximize/restore only called `wm_size_resize_term()` for `RESIZE_TERM`, so sessions using the default "resize either" behavior could redraw locally without sending the remote pty resize to Mosh/vim.
 * Host output decoding now has a callback/streaming API, so large unicode/full-screen server updates no longer have to fit in an 8 KiB temporary output buffer before being ACKed.
@@ -51,6 +51,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Standalone `cmosh` now enters the established session loop from the first authenticated server state if no immediate post-ACK packet arrives. Delayed/lost start ACKs can now be recovered by duplicate server packets and later ACKs instead of falling through and exiting.
 * Native PuTTY Mosh now caches the exact initial encrypted association probe and resends those same bytes once per second until the first authenticated UDP packet arrives. Do not regenerate this packet for retries; it uses the same transport nonce.
 * Native PuTTY Mosh now marks queued input/resize/retransmit records immediately retryable if a backend UDP send is known not to have been attempted because the socket is unavailable.
+* Native PuTTY Mosh now treats UDP plug close/error callbacks as local socket failures to recover from: it attempts a UDP socket reopen before reporting a fatal disconnect. Server shutdown still comes from authenticated Mosh transport state.
 
 ## Protocol Invariants
 
@@ -59,6 +60,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * If a packet was encoded but definitely not sent because of a transient local UDP error, queued input must remain owned by the client and should become retryable immediately.
 * A missing immediate post-start packet is not fatal after the first authenticated server packet; initialise from that first server state and let normal duplicate/ACK handling converge.
 * Repeated Mosh association probes must reuse the exact original encrypted packet bytes, not re-encrypt changed plaintext with the same nonce.
+* A local UDP socket close/error is not equivalent to remote exit for Mosh; reopen locally and send a fresh datagram to re-establish the path.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
@@ -103,6 +105,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after standalone startup-send/post-ACK fallback and PuTTY unsent-packet retry hints.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after standalone startup-send/post-ACK fallback and PuTTY unsent-packet retry hints.
 * Latest `cmake --build build --target putty --config Debug` passed after standalone startup-send/post-ACK fallback and PuTTY unsent-packet retry hints.
+* Latest `cmake --build build --target putty --config Debug` passed after UDP plug close/error reopen handling and immediate post-reopen datagram send.
 
 ## Known Issues
 

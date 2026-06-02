@@ -305,6 +305,30 @@ static void mosh_udp_closing(Plug *plug, PlugCloseType type,
 {
     Mosh *mosh = container_of(plug, Mosh, udp_plug);
 
+    if (mosh->shutdown)
+        return;
+    if (mosh->udp_started && type != PLUGCLOSE_USER_ABORT) {
+        char msg[256];
+
+        snprintf(msg, sizeof(msg),
+                 "Mosh UDP socket closed%s%s; attempting local reopen",
+                 error_msg ? ": " : "", error_msg ? error_msg : "");
+        logevent(mosh->logctx, msg);
+        if (mosh_reopen_udp_socket(mosh))
+            return;
+        if (error_msg)
+            seat_connection_fatal(mosh->seat,
+                                  "Mosh UDP socket closed and reopen failed: "
+                                  "%s",
+                                  error_msg);
+        else
+            seat_connection_fatal(mosh->seat,
+                                  "Mosh UDP socket closed and reopen failed");
+        mosh->shutdown = true;
+        seat_notify_remote_disconnect(mosh->seat);
+        return;
+    }
+
     mosh->shutdown = true;
     if (type == PLUGCLOSE_NORMAL)
         seat_notify_remote_exit(mosh->seat);
@@ -484,6 +508,13 @@ static bool mosh_reopen_udp_socket(Mosh *mosh)
     if (old_socket)
         sk_close(old_socket);
     logevent(mosh->logctx, "Mosh UDP socket reopened after timeout");
+    if (mosh->udp_ready) {
+        mosh_send_ack(mosh, GETTICKCOUNT());
+        mosh_try_send_pending(mosh);
+    } else {
+        mosh->last_assoc_probe_ms = 0;
+        mosh_send_assoc_probe(mosh, GETTICKCOUNT());
+    }
     return true;
 }
 
