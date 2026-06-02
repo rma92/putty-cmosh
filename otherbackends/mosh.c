@@ -16,6 +16,7 @@
 #include <string.h>
 
 #define MOSH_ASSOC_RETRY_MS 1000U
+#define MOSH_START_ACK_RETRY_MS 250U
 #define MOSH_UDP_REOPEN_RETRY_MS 1000U
 #define MOSH_UDP_SEND_FAIL_LOG_MS 5000U
 
@@ -50,8 +51,10 @@ struct Mosh {
     uint64_t last_assoc_probe_ms;
     uint64_t last_input_diag_ms;
     uint64_t last_recv_diag_ms;
+    uint64_t last_start_ack_retry_ms;
     uint64_t last_udp_send_fail_log_ms;
     uint64_t last_udp_reopen_attempt_ms;
+    unsigned int pending_start_ack_timestamp;
     bool udp_started;
     bool udp_start_queued;
     bool udp_reopen_queued;
@@ -60,6 +63,7 @@ struct Mosh {
     bool remote_exited;
     bool shutdown;
     bool udp_target_ready;
+    bool pending_start_ack;
     bool pending_resize;
     bool logged_state_only_output;
 };
@@ -71,6 +75,7 @@ static bool mosh_reopen_udp_socket(Mosh *mosh);
 static void mosh_queue_udp_reopen(Mosh *mosh);
 static bool mosh_start_udp(Mosh *mosh);
 static void mosh_start_udp_callback(void *ctx);
+static bool mosh_try_send_start_ack(Mosh *mosh, unsigned long now);
 static bool mosh_try_send_resize(Mosh *mosh, uint64_t now);
 static void mosh_try_send_pending(Mosh *mosh);
 static bool mosh_sendok(Backend *be);
@@ -316,6 +321,32 @@ static void mosh_send_assoc_probe(Mosh *mosh, unsigned long now)
         mosh->last_assoc_probe_ms = 0;
 }
 
+static bool mosh_try_send_start_ack(Mosh *mosh, unsigned long now)
+{
+    unsigned char packet[CMOSH_MAX_PACKET];
+    size_t packet_len = 0;
+
+    if (!mosh->pending_start_ack)
+        return true;
+    if (!mosh->udp_socket || mosh->shutdown)
+        return false;
+    if (mosh->last_start_ack_retry_ms &&
+        !mosh_interval_due(mosh->last_start_ack_retry_ms, now,
+                           MOSH_START_ACK_RETRY_MS))
+        return false;
+    if (cmosh_client_make_start_ack(
+            mosh->bootstrap.key, mosh->pending_start_ack_timestamp,
+            mosh_now16(now), packet, sizeof(packet), &packet_len) != 0)
+        return false;
+    if (!mosh_udp_send(mosh, packet, packet_len)) {
+        mosh->last_start_ack_retry_ms = (uint64_t)now;
+        return false;
+    }
+    mosh->pending_start_ack = false;
+    mosh->last_start_ack_retry_ms = (uint64_t)now;
+    return true;
+}
+
 static void mosh_send_ack(Mosh *mosh, unsigned long now)
 {
     unsigned char packet[CMOSH_MAX_PACKET];
@@ -323,6 +354,7 @@ static void mosh_send_ack(Mosh *mosh, unsigned long now)
 
     if (!mosh->udp_ready || mosh->shutdown)
         return;
+    mosh_try_send_start_ack(mosh, now);
     if (cmosh_client_make_ack(&mosh->client, mosh_now16(now), packet,
                               sizeof(packet), &packet_len) == 0 &&
         !mosh_udp_send(mosh, packet, packet_len))
@@ -350,6 +382,7 @@ static void mosh_timer(void *ctx, unsigned long now)
     }
 
     mosh_send_assoc_probe(mosh, now);
+    mosh_try_send_start_ack(mosh, now);
     mosh_send_idle(mosh, now);
     if (!mosh->shutdown)
         schedule_timer(100, mosh_timer, mosh);
@@ -400,7 +433,7 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
                              size_t len)
 {
     Mosh *mosh = container_of(plug, Mosh, udp_plug);
-    unsigned char packet[CMOSH_MAX_PACKET], diff[CMOSH_SERVER_DIFF_MAX];
+    unsigned char diff[CMOSH_SERVER_DIFF_MAX];
     struct cmosh_transport_instruction ti;
     struct cmosh_client_recv_event event;
     unsigned int timestamp = 0, echo_timestamp = 0;
@@ -418,11 +451,10 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
         if (decode_result != 0)
             return;
 
-        if (cmosh_client_make_start_ack(mosh->bootstrap.key, timestamp,
-                                        mosh_now16(GETTICKCOUNT()), packet,
-                                        sizeof(packet), &len) != 0)
-            return;
-        mosh_udp_send(mosh, packet, len);
+        mosh->pending_start_ack = true;
+        mosh->pending_start_ack_timestamp = timestamp;
+        mosh->last_start_ack_retry_ms = 0;
+        mosh_try_send_start_ack(mosh, GETTICKCOUNT());
         cmosh_client_init(&mosh->client, mosh->bootstrap.key, ti.ack_num,
                           ti.new_num, seq, timestamp, 3);
         cmosh_client_note_recv_time(&mosh->client,
@@ -1080,10 +1112,16 @@ static void mosh_send(Backend *be, const char *buf, size_t len)
 static size_t mosh_sendbuffer(Backend *be)
 {
     Mosh *mosh = container_of(be, Mosh, backend);
+    size_t control_pending = 0;
 
     if (mosh->shutdown)
         return 0;
-    return mosh->client.input.bytes_len + mosh->pending_input->len;
+    if (mosh->pending_start_ack)
+        control_pending++;
+    if (mosh->pending_resize)
+        control_pending++;
+    return mosh->client.input.bytes_len + mosh->pending_input->len +
+           control_pending;
 }
 
 static void mosh_size(Backend *be, int width, int height)
@@ -1138,6 +1176,7 @@ static bool mosh_sendok(Backend *be)
     Mosh *mosh = container_of(be, Mosh, backend);
 
     return mosh->udp_ready && mosh->udp_socket && !mosh->shutdown &&
+           !mosh->pending_start_ack && !mosh->pending_resize &&
            mosh->pending_input->len == 0 &&
            mosh->client.input.nrecords < CMOSH_INPUT_MAX_RECORDS &&
            mosh->client.input.bytes_len < CMOSH_INPUT_MAX_BYTES;
