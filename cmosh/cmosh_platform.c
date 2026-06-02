@@ -603,6 +603,11 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                   stderr);
         goto out_socket;
     }
+    if ((seq & CMOSH_SERVER_NONCE_BASE) == 0) {
+        if (verbose)
+            fputs("cmosh: UDP response used client nonce space\n", stderr);
+        goto out_socket;
+    }
 
     if (verbose)
         fprintf(stderr,
@@ -646,7 +651,8 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                 cmosh_transport_decode_packet(
                     key, packet, packet_len, &ti, post_ack_diff,
                     sizeof(post_ack_diff), &post_ack_ts, &post_ack_echo_ts,
-                    &seq) == 0) {
+                    &seq) == 0 &&
+                (seq & CMOSH_SERVER_NONCE_BASE) != 0) {
                     if (verbose)
                         fprintf(stderr,
                                 "cmosh: received post-ACK transport packet "

@@ -71,6 +71,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Receive replay history is now committed only after a decrypted packet has passed the relevant payload validation. A malformed packet with a fresh sequence no longer poisons the replay window and blocks a later valid packet using that same sequence.
 * Native PuTTY Mosh backend diagnostic/probe throttles now use a local interval helper instead of raw `(uint64_t)now - last` arithmetic. This avoids log/probe storms on backwards time while preserving normal 32-bit tick wrap behavior.
 * Stateful cmosh server receive now rejects packets outside the server nonce space before replay-history lookup or fragment/state mutation. Reflected client-side datagrams can no longer be consumed as server updates.
+* Standalone `cmosh` bootstrap now also rejects first UDP responses outside the server nonce space, and ignores post-ACK responses outside the server nonce space. This matches the PuTTY bootstrap path and avoids treating reflected client datagrams as authenticated server startup state.
 * Receive replay now rejects packets older than the retained replay window before parsing/applying them. This preserves in-window out-of-order delivery but prevents very old authenticated datagrams from re-entering processing after the ring buffer has evicted their sequence.
 * Server diff queueing now rejects non-advancing state ranges and conflicting duplicate transitions for the same `old_num`/`new_num`; identical retransmitted transitions remain accepted.
 * `cmosh_client_recv_packet()` now only decodes/authenticates transport packets; `cmosh_client_process_packet()` commits echo timestamps plus input ACK/throwaway trimming only after the server instruction is accepted and any applicable diff output succeeds.
@@ -206,6 +207,10 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after byte-identical start ACK retry hardening.
 * Latest `cmake --build build --target putty --config Debug` passed after byte-identical start ACK retry hardening.
 * Latest `cmake --build build --target cmosh --config Debug` passed after byte-identical start ACK retry hardening.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after standalone bootstrap server nonce-space hardening.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after standalone bootstrap server nonce-space hardening.
+* Latest `cmake --build build --target cmosh --config Debug` passed after standalone bootstrap server nonce-space hardening.
+* Latest `cmake --build build --target putty --config Debug` passed after standalone bootstrap server nonce-space hardening.
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after protocol-version, far-future-state, and shutdown-sentinel hardening.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after protocol-version, far-future-state, and shutdown-sentinel hardening.
 * Latest `cmake --build build --target cmosh --config Debug` passed after protocol-version, far-future-state, and shutdown-sentinel hardening.
