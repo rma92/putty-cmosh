@@ -77,6 +77,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Transport decode now rejects authenticated packets whose decoded `protocol_version` does not match `CMOSH_PROTOCOL_VERSION`.
 * Client receive now ignores server-state transitions whose `old_num` is beyond `CMOSH_CLIENT_SERVER_FUTURE_WINDOW` from the current state, preventing far-future packets from churning the bounded recovery queue.
 * Server shutdown reporting now comes from the committed client server state, not directly from an ignored/stale packet's `new_num`. The queue selector also handles the shutdown sentinel `UINT64_MAX` as an applicable next state.
+* ACK-only server transitions with no host-output diff now use the retained server-diff commit path, so server state, echo timestamp, ACK, and throwaway metadata are applied atomically with other accepted transitions.
 
 ## Protocol Invariants
 
@@ -108,6 +109,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Far-future server transitions outside `CMOSH_CLIENT_SERVER_FUTURE_WINDOW` must not enter the future-diff queue. They may still carry authenticated input ACK/throwaway information after high-level validation.
 * Remote shutdown is a committed server-state transition. Stale or ignored packets with `new_num == UINT64_MAX` must not notify remote exit unless the state machine actually advances to `CMOSH_CLIENT_SERVER_SHUTDOWN_STATE`.
 * Decoded transport instructions must match `CMOSH_PROTOCOL_VERSION` before client state, ACK trimming, or host output can be affected.
+* No-diff server-state transitions still advance state and commit retained ACK/throwaway metadata. Stale no-diff transitions must not advance server state, though their authenticated ACK/throwaway fields may still trim input after high-level validation.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
@@ -200,6 +202,10 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after protocol-version, far-future-state, and shutdown-sentinel hardening.
 * Latest `cmake --build build --target cmosh --config Debug` passed after protocol-version, far-future-state, and shutdown-sentinel hardening.
 * Latest `cmake --build build --target putty --config Debug` passed after protocol-version, far-future-state, and shutdown-sentinel hardening.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after no-diff server-transition metadata hardening.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after no-diff server-transition metadata hardening.
+* Latest `cmake --build build --target putty --config Debug` passed after no-diff server-transition metadata hardening.
+* Latest `cmake --build build --target cmosh --config Debug` passed after no-diff server-transition metadata hardening.
 
 ## Known Issues
 

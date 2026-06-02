@@ -402,14 +402,13 @@ int cmosh_client_queue_server_diff(struct cmosh_client *client,
 {
     if (!client || !ti)
         return -1;
-    if (ti->diff_len || ti->old_num > client->server_state) {
-        return cmosh_server_queue_add_full(
-            &client->server_queue, ti->old_num, ti->new_num, ti->ack_num,
-            ti->throwaway_num, timestamp, ti->diff, ti->diff_len);
-    } else if (ti->old_num <= client->server_state) {
-        client->server_state = ti->new_num;
-    }
-    return 0;
+    if (ti->new_num <= client->server_state)
+        return 0;
+    if (ti->old_num < client->server_state)
+        return 0;
+    return cmosh_server_queue_add_full(
+        &client->server_queue, ti->old_num, ti->new_num, ti->ack_num,
+        ti->throwaway_num, timestamp, ti->diff, ti->diff_len);
 }
 
 int cmosh_client_note_server_instruction(
@@ -442,12 +441,13 @@ int cmosh_client_apply_server_diffs(struct cmosh_client *client,
 {
     struct cmosh_server_diff *entry;
 
-    if (!client || !output)
+    if (!client)
         return -1;
     while ((entry = cmosh_server_queue_pop_next(&client->server_queue,
                                                 client->server_state)) !=
            NULL) {
-        if (output(ctx, entry->diff, entry->len) != 0)
+        if (entry->len && (!output || output(ctx, entry->diff,
+                                             entry->len) != 0))
             return -1;
         client->server_state = entry->new_num;
         if (entry->has_metadata) {

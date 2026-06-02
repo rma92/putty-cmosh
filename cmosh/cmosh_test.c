@@ -1354,6 +1354,53 @@ static void test_client(void)
               "client process duplicate");
     }
 
+    cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 30,
+                      0, 7);
+    check(cmosh_client_make_input(&client, (const unsigned char *)"x", 1,
+                                  100, 0x5540, packet, sizeof(packet),
+                                  &n) == 0 &&
+              cmosh_client_make_input(&client, (const unsigned char *)"y",
+                                      1, 101, 0x5541, packet,
+                                      sizeof(packet), &n) == 0,
+          "client no-diff ack setup");
+    check(make_test_transport_packet(key, 31, 5, 6, 3, 3, NULL, 0,
+                                     0x5542, packet, sizeof(packet), &n) == 0,
+          "client no-diff ack packet source");
+    {
+        struct cmosh_client_recv_event event;
+        check(cmosh_client_process_packet(
+                  &client, packet, n, diff, sizeof(diff), NULL, NULL,
+                  &event) == CMOSH_CLIENT_RECV_OK &&
+              event.should_ack && !event.queued_future &&
+              event.input_acked_before == 1 && event.input_acked_after == 3 &&
+              client.server_state == 6 && client.input.acked == 3 &&
+              client.input.nrecords == 0 && client.echo_timestamp == 0x5542,
+              "client process no-diff transition commits metadata");
+    }
+
+    cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 32,
+                      0, 7);
+    check(cmosh_client_make_input(&client, (const unsigned char *)"x", 1,
+                                  100, 0x5543, packet, sizeof(packet),
+                                  &n) == 0 &&
+              cmosh_client_make_input(&client, (const unsigned char *)"y",
+                                      1, 101, 0x5544, packet,
+                                      sizeof(packet), &n) == 0,
+          "client stale no-diff ack setup");
+    check(make_test_transport_packet(key, 33, 4, 6, 3, 3, NULL, 0,
+                                     0x5545, packet, sizeof(packet), &n) == 0,
+          "client stale no-diff ack packet source");
+    {
+        struct cmosh_client_recv_event event;
+        check(cmosh_client_process_packet(
+                  &client, packet, n, diff, sizeof(diff), NULL, NULL,
+                  &event) == CMOSH_CLIENT_RECV_OK &&
+              !event.should_ack && !event.queued_future &&
+              client.server_state == 5 && client.input.acked == 3 &&
+              client.input.nrecords == 0,
+              "client stale no-diff transition does not advance state");
+    }
+
     cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 40,
                       0, 7);
     memset(&sink, 0, sizeof(sink));
