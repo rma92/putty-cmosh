@@ -31,8 +31,12 @@ struct cmosh_input_state {
 
 struct cmosh_server_diff {
     int used;
+    int has_metadata;
     uint64_t old_num;
     uint64_t new_num;
+    uint64_t ack_num;
+    uint64_t throwaway_num;
+    unsigned int timestamp;
     size_t len;
     unsigned char *diff;
 };
@@ -61,6 +65,11 @@ void cmosh_server_queue_clear(struct cmosh_server_queue *queue);
 int cmosh_server_queue_add(struct cmosh_server_queue *queue, uint64_t old_num,
                            uint64_t new_num, const unsigned char *diff,
                            size_t diff_len);
+int cmosh_server_queue_add_full(struct cmosh_server_queue *queue,
+                                uint64_t old_num, uint64_t new_num,
+                                uint64_t ack_num, uint64_t throwaway_num,
+                                unsigned int timestamp,
+                                const unsigned char *diff, size_t diff_len);
 struct cmosh_server_diff *cmosh_server_queue_pop_next(
     struct cmosh_server_queue *queue, uint64_t server_state);
 int cmosh_server_queue_waiting_for_gap(const struct cmosh_server_queue *queue,

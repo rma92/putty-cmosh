@@ -90,6 +90,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Stale overlapping display diffs cannot be applied from the current server state and must not consume future-diff queue slots.
 * A duplicate server packet may still be useful if a prior output callback failure left an applicable server diff queued. The high-level receive path now retries queued applicable diffs on duplicate packets, while preserving duplicate classification for callers. PuTTY and standalone `cmosh` duplicate handling must still honor server shutdown after such a retry.
 * While reassembling fragmented transport instructions, an older fragment ID must not clear a newer in-progress fragmented instruction. Newer IDs may still supersede older incomplete assemblies.
+* Queued server diffs now retain authenticated ACK/throwaway metadata and the packet timestamp. If host output fails once and a later duplicate drains the retained diff, input trimming and echo timestamp update complete with that retained metadata instead of leaving retransmission state stale.
+* When the bounded server-diff queue is full, preserve the closest recoverable state transitions. A nearer incoming diff may evict the farthest future diff, while a too-far future diff is dropped instead of displacing closer recovery state.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
@@ -161,6 +163,10 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target cmosh --config Debug` passed after standalone duplicate-drain shutdown handling.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after standalone duplicate-drain shutdown handling.
 * Latest `cmake --build build --target putty --config Debug` passed after standalone duplicate-drain shutdown handling.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after server-diff queue overflow and retained metadata hardening.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after server-diff queue overflow and retained metadata hardening.
+* Latest `cmake --build build --target cmosh --config Debug` passed after server-diff queue overflow and retained metadata hardening.
+* Latest `cmake --build build --target putty --config Debug` passed after server-diff queue overflow and retained metadata hardening.
 
 ## Known Issues
 

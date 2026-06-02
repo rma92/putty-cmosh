@@ -156,12 +156,13 @@ void cmosh_server_queue_clear(struct cmosh_server_queue *queue)
         cmosh_server_diff_clear(&queue->entries[i]);
 }
 
-int cmosh_server_queue_add(struct cmosh_server_queue *queue, uint64_t old_num,
-                           uint64_t new_num, const unsigned char *diff,
-                           size_t diff_len)
+static int cmosh_server_queue_add_internal(
+    struct cmosh_server_queue *queue, uint64_t old_num, uint64_t new_num,
+    uint64_t ack_num, uint64_t throwaway_num, unsigned int timestamp,
+    int has_metadata, const unsigned char *diff, size_t diff_len)
 {
-    size_t i, slot = CMOSH_SERVER_QUEUE, oldest = CMOSH_SERVER_QUEUE;
-    uint64_t oldest_new = UINT64_MAX;
+    size_t i, slot = CMOSH_SERVER_QUEUE, farthest = CMOSH_SERVER_QUEUE;
+    uint64_t farthest_old = 0, farthest_new = 0;
 
     if (!queue || (!diff && diff_len) || diff_len > CMOSH_SERVER_DIFF_MAX ||
         new_num <= old_num)
@@ -172,26 +173,47 @@ int cmosh_server_queue_add(struct cmosh_server_queue *queue, uint64_t old_num,
             queue->entries[i].new_num == new_num) {
             if (queue->entries[i].len == diff_len &&
                 (!diff_len ||
-                 memcmp(queue->entries[i].diff, diff, diff_len) == 0))
+                 memcmp(queue->entries[i].diff, diff, diff_len) == 0)) {
+                if (has_metadata) {
+                    if (ack_num > queue->entries[i].ack_num)
+                        queue->entries[i].ack_num = ack_num;
+                    if (throwaway_num > queue->entries[i].throwaway_num)
+                        queue->entries[i].throwaway_num = throwaway_num;
+                    queue->entries[i].timestamp = timestamp;
+                    queue->entries[i].has_metadata = 1;
+                }
                 return 0;
+            }
             return -1;
         }
         if (!queue->entries[i].used && slot == CMOSH_SERVER_QUEUE)
             slot = i;
-        if (queue->entries[i].used && queue->entries[i].new_num < oldest_new) {
-            oldest_new = queue->entries[i].new_num;
-            oldest = i;
+        if (queue->entries[i].used &&
+            (queue->entries[i].old_num > farthest_old ||
+             (queue->entries[i].old_num == farthest_old &&
+              queue->entries[i].new_num > farthest_new))) {
+            farthest_old = queue->entries[i].old_num;
+            farthest_new = queue->entries[i].new_num;
+            farthest = i;
         }
     }
-    if (slot == CMOSH_SERVER_QUEUE)
-        slot = oldest;
+    if (slot == CMOSH_SERVER_QUEUE) {
+        if (old_num > farthest_old ||
+            (old_num == farthest_old && new_num >= farthest_new))
+            return 0;
+        slot = farthest;
+    }
     if (slot == CMOSH_SERVER_QUEUE)
         return -1;
 
     cmosh_server_diff_clear(&queue->entries[slot]);
     queue->entries[slot].used = 1;
+    queue->entries[slot].has_metadata = has_metadata;
     queue->entries[slot].old_num = old_num;
     queue->entries[slot].new_num = new_num;
+    queue->entries[slot].ack_num = ack_num;
+    queue->entries[slot].throwaway_num = throwaway_num;
+    queue->entries[slot].timestamp = timestamp;
     queue->entries[slot].len = diff_len;
     if (diff_len) {
         queue->entries[slot].diff = malloc(diff_len);
@@ -202,6 +224,25 @@ int cmosh_server_queue_add(struct cmosh_server_queue *queue, uint64_t old_num,
         memcpy(queue->entries[slot].diff, diff, diff_len);
     }
     return 0;
+}
+
+int cmosh_server_queue_add_full(struct cmosh_server_queue *queue,
+                                uint64_t old_num, uint64_t new_num,
+                                uint64_t ack_num, uint64_t throwaway_num,
+                                unsigned int timestamp,
+                                const unsigned char *diff, size_t diff_len)
+{
+    return cmosh_server_queue_add_internal(
+        queue, old_num, new_num, ack_num, throwaway_num, timestamp, 1,
+        diff, diff_len);
+}
+
+int cmosh_server_queue_add(struct cmosh_server_queue *queue, uint64_t old_num,
+                           uint64_t new_num, const unsigned char *diff,
+                           size_t diff_len)
+{
+    return cmosh_server_queue_add_internal(
+        queue, old_num, new_num, 0, 0, 0, 0, diff, diff_len);
 }
 
 struct cmosh_server_diff *cmosh_server_queue_pop_next(

@@ -365,7 +365,8 @@ enum cmosh_client_recv_result cmosh_client_process_packet(
     if (result != CMOSH_CLIENT_RECV_OK)
         return result;
 
-    if (cmosh_client_note_server_instruction(client, &ti, &queued_future,
+    if (cmosh_client_note_server_instruction(client, &ti, timestamp,
+                                             &queued_future,
                                              &previous_server_state) != 0) {
         if (event)
             event->result = CMOSH_CLIENT_RECV_BAD_PACKET;
@@ -396,13 +397,15 @@ enum cmosh_client_recv_result cmosh_client_process_packet(
 }
 
 int cmosh_client_queue_server_diff(struct cmosh_client *client,
-                                   const struct cmosh_transport_instruction *ti)
+                                   const struct cmosh_transport_instruction *ti,
+                                   unsigned int timestamp)
 {
     if (!client || !ti)
         return -1;
     if (ti->diff_len || ti->old_num > client->server_state) {
-        return cmosh_server_queue_add(&client->server_queue, ti->old_num,
-                                      ti->new_num, ti->diff, ti->diff_len);
+        return cmosh_server_queue_add_full(
+            &client->server_queue, ti->old_num, ti->new_num, ti->ack_num,
+            ti->throwaway_num, timestamp, ti->diff, ti->diff_len);
     } else if (ti->old_num <= client->server_state) {
         client->server_state = ti->new_num;
     }
@@ -411,7 +414,8 @@ int cmosh_client_queue_server_diff(struct cmosh_client *client,
 
 int cmosh_client_note_server_instruction(
     struct cmosh_client *client, const struct cmosh_transport_instruction *ti,
-    int *queued_future, uint64_t *previous_server_state)
+    unsigned int timestamp, int *queued_future,
+    uint64_t *previous_server_state)
 {
     if (!client || !ti)
         return -1;
@@ -425,7 +429,7 @@ int cmosh_client_note_server_instruction(
         return 0;
     if (ti->old_num > client->server_state && queued_future)
         *queued_future = 1;
-    return cmosh_client_queue_server_diff(client, ti);
+    return cmosh_client_queue_server_diff(client, ti, timestamp);
 }
 
 int cmosh_client_apply_server_diffs(struct cmosh_client *client,
@@ -442,6 +446,11 @@ int cmosh_client_apply_server_diffs(struct cmosh_client *client,
         if (output(ctx, entry->diff, entry->len) != 0)
             return -1;
         client->server_state = entry->new_num;
+        if (entry->has_metadata) {
+            client->echo_timestamp = entry->timestamp;
+            cmosh_input_note_ack(&client->input, entry->ack_num);
+            cmosh_input_note_ack(&client->input, entry->throwaway_num);
+        }
         free(entry->diff);
         entry->diff = NULL;
         entry->used = 0;

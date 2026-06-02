@@ -656,6 +656,7 @@ static void test_session(void)
     unsigned char diff[64];
     size_t diff_len;
     uint64_t gap_old, gap_new;
+    size_t i;
 
     cmosh_input_init(&input, 10);
     check(cmosh_input_append(&input, (const unsigned char *)"ab", 2, 100) ==
@@ -723,6 +724,27 @@ static void test_session(void)
                                              &gap_new) &&
               gap_old == 4 && gap_new == 5,
           "session queue detects gap");
+    cmosh_server_queue_clear(&queue);
+    for (i = 0; i < CMOSH_SERVER_QUEUE; i++) {
+        diff[0] = (unsigned char)i;
+        check(cmosh_server_queue_add(&queue, 100 + i, 101 + i,
+                                     diff, 1) == 0,
+              "session queue fill with future diffs");
+    }
+    check(cmosh_server_queue_add(&queue, 1000, 1001,
+                                 (const unsigned char *)"z", 1) == 0,
+          "session queue drops too-far diff when full");
+    entry = cmosh_server_queue_pop_next(&queue, 100);
+    check(entry && entry->old_num == 100 && entry->new_num == 101,
+          "session queue overflow keeps closest existing diff");
+    check(cmosh_server_queue_add(&queue, 4, 5,
+                                 (const unsigned char *)"e", 1) == 0,
+          "session queue add near diff when full");
+    entry = cmosh_server_queue_pop_next(&queue, 4);
+    check(entry && entry->old_num == 4 && entry->new_num == 5 &&
+              entry->diff[0] == 'e',
+          "session queue overflow preserves nearest diff");
+    cmosh_server_queue_clear(&queue);
 }
 
 struct test_output_sink {
@@ -986,7 +1008,7 @@ static void test_client(void)
                                    sizeof(diff), &timestamp, &seq) ==
               CMOSH_CLIENT_RECV_DUPLICATE,
           "client receive duplicate");
-    check(cmosh_client_queue_server_diff(&client, &ti) == 0 &&
+    check(cmosh_client_queue_server_diff(&client, &ti, timestamp) == 0 &&
               cmosh_server_queue_pop_next(&client.server_queue,
                                           client.server_state) != NULL,
           "client queue server diff");
@@ -994,7 +1016,8 @@ static void test_client(void)
     memset(&sink, 0, sizeof(sink));
     previous_state = 0;
     queued_future = 0;
-    check(cmosh_client_note_server_instruction(&client, &ti, &queued_future,
+    check(cmosh_client_note_server_instruction(&client, &ti, timestamp,
+                                               &queued_future,
                                                &previous_state) == 0 &&
               previous_state == 20 && !queued_future,
           "client note server instruction");
@@ -1014,7 +1037,8 @@ static void test_client(void)
     ti.diff = (const unsigned char *)"z";
     ti.diff_len = 1;
     queued_future = 0;
-    check(cmosh_client_note_server_instruction(&client, &ti, &queued_future,
+    check(cmosh_client_note_server_instruction(&client, &ti, 0,
+                                               &queued_future,
                                                &previous_state) == 0 &&
               previous_state == 21 && queued_future &&
               cmosh_client_waiting_for_gap(&client, NULL, NULL),
@@ -1198,8 +1222,15 @@ static void test_client(void)
     cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 40,
                       0, 7);
     memset(&sink, 0, sizeof(sink));
+    check(cmosh_client_make_input(&client, (const unsigned char *)"x", 1,
+                                  100, 0x5560, packet, sizeof(packet),
+                                  &n) == 0 &&
+              cmosh_client_make_input(&client, (const unsigned char *)"y",
+                                      1, 101, 0x5561, packet,
+                                      sizeof(packet), &n) == 0,
+          "client process retry output ack setup");
     check(cmosh_transport_make_packet(key, CMOSH_SERVER_NONCE_BASE | 41,
-                                      5, 6, 1,
+                                      5, 6, 3,
                                       (const unsigned char *)"r", 1, 0x5566,
                                       0, packet, sizeof(packet), &n) == 0,
           "client process retry output packet source");
@@ -1213,7 +1244,8 @@ static void test_client(void)
                   &client, packet, n, diff, sizeof(diff),
                   test_output_fail_once_callback, &fail_ctx, &event) ==
                   CMOSH_CLIENT_RECV_BAD_PACKET &&
-              client.server_state == 5 && sink.len == 0,
+              client.server_state == 5 && sink.len == 0 &&
+              client.input.acked == 1 && client.input.nrecords == 2,
               "client output failure retains queued diff");
         check(cmosh_client_process_packet(
                   &client, packet, n, diff, sizeof(diff),
@@ -1221,9 +1253,13 @@ static void test_client(void)
                   CMOSH_CLIENT_RECV_DUPLICATE &&
               event.result == CMOSH_CLIENT_RECV_DUPLICATE &&
               event.should_ack && event.previous_server_state == 5 &&
+              event.input_acked_before == 1 &&
+              event.input_acked_after == 3 &&
               client.server_state == 6 && sink.len == 1 &&
-              sink.bytes[0] == 'r',
-              "client duplicate retries retained queued diff");
+              sink.bytes[0] == 'r' && client.input.acked == 3 &&
+              client.input.nrecords == 0 &&
+              client.echo_timestamp == 0x5566,
+              "client duplicate retries retained queued diff and ack");
     }
 
     cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 20,
@@ -1233,7 +1269,8 @@ static void test_client(void)
     ti.new_num = 9;
     ti.diff = (const unsigned char *)"g";
     ti.diff_len = 1;
-    check(cmosh_client_note_server_instruction(&client, &ti, &queued_future,
+    check(cmosh_client_note_server_instruction(&client, &ti, 0,
+                                               &queued_future,
                                                &previous_state) == 0 &&
               queued_future,
           "client idle setup gap");

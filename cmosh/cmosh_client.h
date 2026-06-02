@@ -124,10 +124,12 @@ enum cmosh_client_recv_result cmosh_client_process_packet(
     cmosh_client_host_output_fn output, void *ctx,
     struct cmosh_client_recv_event *event);
 int cmosh_client_queue_server_diff(struct cmosh_client *client,
-                                   const struct cmosh_transport_instruction *ti);
+                                   const struct cmosh_transport_instruction *ti,
+                                   unsigned int timestamp);
 int cmosh_client_note_server_instruction(
     struct cmosh_client *client, const struct cmosh_transport_instruction *ti,
-    int *queued_future, uint64_t *previous_server_state);
+    unsigned int timestamp, int *queued_future,
+    uint64_t *previous_server_state);
 int cmosh_client_apply_server_diffs(struct cmosh_client *client,
                                     cmosh_client_host_output_fn output,
                                     void *ctx);
