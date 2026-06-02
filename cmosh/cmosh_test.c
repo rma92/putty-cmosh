@@ -844,8 +844,10 @@ static void test_client(void)
     check(cmosh_client_recv_packet(&client, packet, n, &ti, diff,
                                    sizeof(diff), &timestamp, &seq) ==
               CMOSH_CLIENT_RECV_OK &&
-              client.input.acked == 11 && client.input.nrecords == 0,
-          "client receive throwaway trims input");
+              ti.throwaway_num == 11 && client.input.acked == 10 &&
+              client.input.nrecords == 1,
+          "client receive throwaway decodes without trimming input");
+    cmosh_input_note_ack(&client.input, ti.throwaway_num);
 
     check(cmosh_client_make_resize(&client, 132, 43, 200, 0x3999, packet,
                                    sizeof(packet), &n) == 0 &&
@@ -889,8 +891,10 @@ static void test_client(void)
     check(cmosh_client_recv_packet(&client, packet, n, &ti, diff,
                                    sizeof(diff), &timestamp, &seq) ==
               CMOSH_CLIENT_RECV_OK &&
-              client.input.acked == 12 && client.input.nrecords == 0,
-          "client receive ack trims resize");
+              ti.throwaway_num == 12 && client.input.acked == 11 &&
+              client.input.nrecords == 1,
+          "client receive ack decodes without trimming resize");
+    cmosh_input_note_ack(&client.input, ti.throwaway_num);
 
     check(cmosh_transport_make_packet(key, CMOSH_SERVER_NONCE_BASE | 10,
                                       20, 21, 12,
@@ -903,7 +907,7 @@ static void test_client(void)
               CMOSH_CLIENT_RECV_OK &&
               seq == (CMOSH_SERVER_NONCE_BASE | 10) &&
               client.input.acked == 12 &&
-              client.echo_timestamp == 0x4444 && ti.diff_len == 1 &&
+              client.echo_timestamp == 0x1111 && ti.diff_len == 1 &&
               diff[0] == 'h',
           "client receive packet");
     check(cmosh_client_recv_packet(&client, packet, n, &ti, diff,
@@ -993,6 +997,60 @@ static void test_client(void)
               event.input_bytes_after == 0 &&
               client.input.acked == 3 && client.input.nrecords == 0,
               "client process reports input ack transition");
+    }
+
+    cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 10,
+                      0, 6);
+    check(cmosh_client_make_input(&client, (const unsigned char *)"x", 1,
+                                  100, 0x5120, packet, sizeof(packet),
+                                  &n) == 0 &&
+              cmosh_client_make_input(&client, (const unsigned char *)"y",
+                                      1, 101, 0x5121, packet,
+                                      sizeof(packet), &n) == 0,
+          "client bad process ack setup");
+    check(make_test_transport_packet(key, 12, 6, 6, 2, 3, NULL, 0,
+                                     0x5122, packet, sizeof(packet), &n) == 0,
+          "client bad process ack packet source");
+    {
+        struct cmosh_client_recv_event event;
+        check(cmosh_client_process_packet(
+                  &client, packet, n, diff, sizeof(diff),
+                  test_output_callback, &sink, &event) ==
+                  CMOSH_CLIENT_RECV_BAD_PACKET &&
+              event.result == CMOSH_CLIENT_RECV_BAD_PACKET &&
+              event.ack_num == 2 && event.throwaway_num == 3 &&
+              event.input_acked_before == 1 &&
+              event.input_acked_after == 1 &&
+              client.input.acked == 1 && client.input.nrecords == 2,
+              "client bad server state does not trim input ack");
+    }
+
+    cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 10,
+                      0, 6);
+    memset(&sink, 0, sizeof(sink));
+    check(cmosh_client_make_input(&client, (const unsigned char *)"x", 1,
+                                  100, 0x5130, packet, sizeof(packet),
+                                  &n) == 0 &&
+              cmosh_client_make_input(&client, (const unsigned char *)"y",
+                                      1, 101, 0x5131, packet,
+                                      sizeof(packet), &n) == 0,
+          "client overlapping stale ack setup");
+    check(make_test_transport_packet(key, 13, 4, 6, 2, 3,
+                                     (const unsigned char *)"r", 1, 0x5132,
+                                     packet, sizeof(packet), &n) == 0,
+          "client overlapping stale packet source");
+    {
+        struct cmosh_client_recv_event event;
+        check(cmosh_client_process_packet(
+                  &client, packet, n, diff, sizeof(diff),
+                  test_output_callback, &sink, &event) ==
+                  CMOSH_CLIENT_RECV_OK &&
+              event.old_num == 4 && event.new_num == 6 &&
+              !event.queued_future && !event.should_ack &&
+              client.server_state == 5 && sink.len == 0 &&
+              !cmosh_client_waiting_for_gap(&client, NULL, NULL) &&
+              client.input.acked == 3 && client.input.nrecords == 0,
+              "client overlapping stale diff ignored but acked");
     }
 
     cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 10,

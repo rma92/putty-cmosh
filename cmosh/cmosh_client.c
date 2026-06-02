@@ -292,9 +292,6 @@ enum cmosh_client_recv_result cmosh_client_recv_packet(
     if (decode_result != 0)
         return CMOSH_CLIENT_RECV_BAD_PACKET;
 
-    client->echo_timestamp = *timestamp;
-    cmosh_input_note_ack(&client->input, ti->ack_num);
-    cmosh_input_note_ack(&client->input, ti->throwaway_num);
     return CMOSH_CLIENT_RECV_OK;
 }
 
@@ -356,6 +353,9 @@ enum cmosh_client_recv_result cmosh_client_process_packet(
             event->result = CMOSH_CLIENT_RECV_BAD_PACKET;
         return CMOSH_CLIENT_RECV_BAD_PACKET;
     }
+    client->echo_timestamp = timestamp;
+    cmosh_input_note_ack(&client->input, ti.ack_num);
+    cmosh_input_note_ack(&client->input, ti.throwaway_num);
     if (event) {
         event->queued_future = queued_future;
         event->previous_server_state = previous_server_state;
@@ -363,6 +363,10 @@ enum cmosh_client_recv_result cmosh_client_process_packet(
             ti.new_num == CMOSH_CLIENT_SERVER_SHUTDOWN_STATE;
         event->should_ack =
             cmosh_client_should_ack(client, &ti, previous_server_state);
+        event->input_acked_after = client->input.acked;
+        event->input_current = client->input.current;
+        event->input_records_after = client->input.nrecords;
+        event->input_bytes_after = client->input.bytes_len;
     }
     return CMOSH_CLIENT_RECV_OK;
 }
@@ -392,6 +396,8 @@ int cmosh_client_note_server_instruction(
     if (previous_server_state)
         *previous_server_state = client->server_state;
     if (ti->new_num <= client->server_state)
+        return 0;
+    if (ti->old_num < client->server_state)
         return 0;
     if (ti->old_num > client->server_state && queued_future)
         *queued_future = 1;
