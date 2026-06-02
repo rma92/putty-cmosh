@@ -163,13 +163,19 @@ int cmosh_server_queue_add(struct cmosh_server_queue *queue, uint64_t old_num,
     size_t i, slot = CMOSH_SERVER_QUEUE, oldest = CMOSH_SERVER_QUEUE;
     uint64_t oldest_new = UINT64_MAX;
 
-    if (!queue || (!diff && diff_len) || diff_len > CMOSH_SERVER_DIFF_MAX)
+    if (!queue || (!diff && diff_len) || diff_len > CMOSH_SERVER_DIFF_MAX ||
+        new_num <= old_num)
         return -1;
     for (i = 0; i < CMOSH_SERVER_QUEUE; i++) {
         if (queue->entries[i].used &&
             queue->entries[i].old_num == old_num &&
-            queue->entries[i].new_num == new_num)
-            return 0;
+            queue->entries[i].new_num == new_num) {
+            if (queue->entries[i].len == diff_len &&
+                (!diff_len ||
+                 memcmp(queue->entries[i].diff, diff, diff_len) == 0))
+                return 0;
+            return -1;
+        }
         if (!queue->entries[i].used && slot == CMOSH_SERVER_QUEUE)
             slot = i;
         if (queue->entries[i].used && queue->entries[i].new_num < oldest_new) {

@@ -39,6 +39,9 @@ int cmosh_transport_note_recv(struct cmosh_transport_state *st, uint64_t seq)
 
     if (!st)
         return -1;
+    if (seq < st->recv_seq &&
+        st->recv_seq - seq >= CMOSH_TRANSPORT_REPLAY_HISTORY)
+        return -1;
     for (i = 0; i < st->recv_history_count; i++) {
         if (st->recv_history[i] == seq)
             return -1;
@@ -64,6 +67,9 @@ static int cmosh_transport_seen_recv(struct cmosh_transport_state *st,
 
     if (!st)
         return 0;
+    if (seq < st->recv_seq &&
+        st->recv_seq - seq >= CMOSH_TRANSPORT_REPLAY_HISTORY)
+        return 1;
     for (i = 0; i < st->recv_history_count; i++) {
         if (st->recv_history[i] == seq)
             return 1;

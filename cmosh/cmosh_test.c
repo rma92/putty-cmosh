@@ -350,6 +350,16 @@ static void test_transport(void)
     check(st.latest_ack == 2, "transport latest ack");
     check(cmosh_transport_note_recv(&st, 1) != 0,
           "transport rejects out-of-order replay");
+    cmosh_transport_init(&st);
+    check(cmosh_transport_note_recv(&st, 100) == 0 &&
+              cmosh_transport_note_recv(&st, 99) == 0,
+          "transport accepts in-window out-of-order seq");
+    cmosh_transport_init(&st);
+    for (seq = 1; seq <= CMOSH_TRANSPORT_REPLAY_HISTORY + 1; seq++)
+        check(cmosh_transport_note_recv(&st, seq) == 0,
+              "transport fills replay history");
+    check(cmosh_transport_note_recv(&st, 1) != 0,
+          "transport rejects old seq outside replay window");
     fromhex("000102030405060708090A0B0C0D0E0F", key, sizeof(key));
     cmosh_transport_nonce_from_seq(CMOSH_CLIENT_NONCE_BASE | 1, nonce);
     check(memcmp(nonce, "\x00\x00\x00\x00\x00\x00\x00\x01", 8) == 0,
@@ -438,6 +448,21 @@ static void test_transport(void)
                   ti.old_num == 5 && ti.new_num == 6 &&
                   ti.ack_num == 7,
               "transport accepts server packet after reflected client packet");
+        cmosh_transport_init(&st);
+        for (seq = 1; seq <= CMOSH_TRANSPORT_REPLAY_HISTORY + 1; seq++)
+            check(cmosh_transport_note_recv(
+                      &st, CMOSH_SERVER_NONCE_BASE | seq) == 0,
+                  "transport state fills server replay history");
+        check(cmosh_transport_make_packet(
+                  key, CMOSH_SERVER_NONCE_BASE | 1, 6, 7, 8, diff,
+                  sizeof(diff), 0x1234, 0x5678, packet, sizeof(packet),
+                  &n) == 0,
+              "transport make stale server packet outside replay window");
+        memset(&ti, 0, sizeof(ti));
+        check(cmosh_transport_decode_packet_state(
+                  &st, key, packet, n, &ti, diff_copy, sizeof(diff_copy),
+                  &timestamp, &echo_timestamp, &seq) == 2,
+              "transport state rejects old server seq outside replay window");
     }
 
     {
@@ -632,6 +657,15 @@ static void test_session(void)
           "session queue add overlapping stale");
     check(cmosh_server_queue_pop_next(&queue, 3) == NULL,
           "session queue ignores overlapping stale diff");
+    check(cmosh_server_queue_add(&queue, 5, 5,
+                                 (const unsigned char *)"", 0) != 0,
+          "session queue rejects non-advancing diff");
+    check(cmosh_server_queue_add(&queue, 4, 5,
+                                 (const unsigned char *)"e", 1) == 0,
+          "session queue accepts identical duplicate diff");
+    check(cmosh_server_queue_add(&queue, 4, 5,
+                                 (const unsigned char *)"x", 1) != 0,
+          "session queue rejects conflicting duplicate diff");
     check(cmosh_server_queue_waiting_for_gap(&queue, 3, &gap_old,
                                              &gap_new) &&
               gap_old == 4 && gap_new == 5,
