@@ -289,7 +289,11 @@ int cmosh_transport_decode_packet_state(
     }
 
     if (frag.index == 0 && frag.final) {
-        cmosh_transport_clear(st);
+        int preserve_fragment = st->fragment_active &&
+            frag.id < st->fragment_id;
+
+        if (!preserve_fragment)
+            cmosh_transport_clear(st);
         ret = cmosh_transport_decode_instruction(frag.payload,
                                                  frag.payload_len, ti,
                                                  diff_buf, diff_buf_len);

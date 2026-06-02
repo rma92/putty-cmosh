@@ -623,6 +623,24 @@ static void test_transport(void)
                   sizeof(diff_copy), &timestamp, &echo_timestamp, &seq) == 1 &&
                   st.fragment_active && st.fragment_id == 102,
               "transport ignores older stale fragment");
+        check(cmosh_encode_fragment(101, 0, 1, compressed, compressed_len,
+                                    fragment, sizeof(fragment),
+                                    &fragment_len) == 0,
+              "encode older complete transport fragment");
+        memcpy(plain2 + 4, fragment, fragment_len);
+        plain_len = fragment_len + 4;
+        check(cmosh_transport_encrypt_packet(
+                  key, CMOSH_SERVER_NONCE_BASE | 48, plain2, plain_len,
+                  packet2, sizeof(packet2), &n) == 0,
+              "encrypt older complete transport fragment");
+        memset(&ti, 0, sizeof(ti));
+        memset(diff_copy, 0, sizeof(diff_copy));
+        check(cmosh_transport_decode_packet_state(
+                  &st, key, packet2, n, &ti, diff_copy,
+                  sizeof(diff_copy), &timestamp, &echo_timestamp, &seq) == 0 &&
+                  ti.old_num == 4 && ti.new_num == 5 &&
+                  st.fragment_active && st.fragment_id == 102,
+              "transport older complete packet preserves newer fragment");
         check(cmosh_encode_fragment(102, 1, 1, compressed + split,
                                     compressed_len - split, fragment,
                                     sizeof(fragment), &fragment_len) == 0,
@@ -630,7 +648,7 @@ static void test_transport(void)
         memcpy(plain2 + 4, fragment, fragment_len);
         plain_len = fragment_len + 4;
         check(cmosh_transport_encrypt_packet(
-                  key, CMOSH_SERVER_NONCE_BASE | 47, plain2, plain_len,
+                  key, CMOSH_SERVER_NONCE_BASE | 49, plain2, plain_len,
                   packet2, sizeof(packet2), &n) == 0,
               "encrypt newer final transport fragment");
         memset(&ti, 0, sizeof(ti));

@@ -816,10 +816,13 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                 packet, sizeof(packet),
                                                 &packet_len) != 0)
                                             goto out_socket;
-                                        if (cmosh_udp_send_packet(
-                                                s, packet, packet_len,
-                                                verbose) < 0)
+                                        send_result = cmosh_udp_send_packet(
+                                            s, packet, packet_len, verbose);
+                                        if (send_result < 0)
                                             goto out_socket;
+                                        if (send_result > 0)
+                                            cmosh_client_note_idle_send_failed(
+                                                &client);
                                         continue;
                                     }
                                     if (event.result ==
@@ -889,10 +892,13 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                                 packet, sizeof(packet),
                                                 &packet_len) != 0)
                                             goto out_socket;
-                                        if (cmosh_udp_send_packet(
-                                                s, packet, packet_len,
-                                                verbose) < 0)
+                                        send_result = cmosh_udp_send_packet(
+                                            s, packet, packet_len, verbose);
+                                        if (send_result < 0)
                                             goto out_socket;
+                                        if (send_result > 0)
+                                            cmosh_client_note_idle_send_failed(
+                                                &client);
                                     }
                                 }
                             }

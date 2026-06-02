@@ -53,9 +53,11 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Native PuTTY Mosh now marks queued input/resize/retransmit records immediately retryable if a backend UDP send is known not to have been attempted because the socket is unavailable.
 * Native PuTTY Mosh now treats UDP plug close/error callbacks as local socket failures to recover from: it attempts a UDP socket reopen before reporting a fatal disconnect. Server shutdown still comes from authenticated Mosh transport state.
 * Native PuTTY Mosh now detaches a locally failed UDP socket from the Plug close callback and queues reopen on PuTTY's top-level callback path. If reopen fails because the local network is still unavailable, it keeps the authenticated Mosh state and retries once per second.
+* If a timeout-driven PuTTY UDP reopen fails while the old socket is still present, the backend now retries socket reopen every `MOSH_UDP_REOPEN_RETRY_MS` instead of waiting for the next 30-second UDP-timeout diagnostic.
 * Native PuTTY Mosh `sendok()` now requires an active UDP socket, so PuTTY applies input backpressure during local UDP outages and wakes the line discipline after a successful reopen.
 * Native PuTTY Mosh now checks the datagram `sk_write()` result. A nonzero return means PuTTY's UDP layer did not send the datagram, including transient buffer-exhaustion cases; retransmitted input is made immediately retryable instead of waiting for the normal retry interval.
 * `cmosh_client_note_idle_send_failed()` rolls back idle/keepalive timing after a failed UDP send, so transient local send failures do not suppress the next keepalive, timeout probe, or retransmit opportunity.
+* Standalone `cmosh` now rolls back idle timing after retryable local UDP send failures for duplicate ACKs and normal server-state ACKs, matching PuTTY backend ACK retry behavior.
 * Native PuTTY Mosh now logs throttled Event Log diagnostics when `sk_write()` reports a local UDP send failure.
 * Native PuTTY Mosh no longer advances the association-probe retry timestamp when the cached initial UDP packet fails to send locally; the next timer tick can retry instead of waiting a full association interval.
 * Failed ACK datagrams now roll back idle timing so the next timer tick can send another empty ACK/keepalive.
@@ -90,6 +92,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Stale overlapping display diffs cannot be applied from the current server state and must not consume future-diff queue slots.
 * A duplicate server packet may still be useful if a prior output callback failure left an applicable server diff queued. The high-level receive path now retries queued applicable diffs on duplicate packets, while preserving duplicate classification for callers. PuTTY and standalone `cmosh` duplicate handling must still honor server shutdown after such a retry.
 * While reassembling fragmented transport instructions, an older fragment ID must not clear a newer in-progress fragmented instruction. Newer IDs may still supersede older incomplete assemblies.
+* A complete single-fragment older packet may decode independently while a newer fragmented instruction is pending, but must not clear the newer partial assembly.
 * Queued server diffs now retain authenticated ACK/throwaway metadata and the packet timestamp. If host output fails once and a later duplicate drains the retained diff, input trimming and echo timestamp update complete with that retained metadata instead of leaving retransmission state stale.
 * When the bounded server-diff queue is full, preserve the closest recoverable state transitions. A nearer incoming diff may evict the farthest future diff, while a too-far future diff is dropped instead of displacing closer recovery state.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
@@ -167,6 +170,11 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after server-diff queue overflow and retained metadata hardening.
 * Latest `cmake --build build --target cmosh --config Debug` passed after server-diff queue overflow and retained metadata hardening.
 * Latest `cmake --build build --target putty --config Debug` passed after server-diff queue overflow and retained metadata hardening.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after stale complete-fragment preservation.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after stale complete-fragment preservation.
+* Latest `cmake --build build --target otherbackends --config Debug` passed after timeout-driven UDP reopen retry hardening.
+* Latest `cmake --build build --target cmosh --config Debug` passed after standalone ACK send-failure handling.
+* Latest `cmake --build build --target putty --config Debug` passed after timeout-driven UDP reopen retry hardening.
 
 ## Known Issues
 

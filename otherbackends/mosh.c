@@ -50,6 +50,7 @@ struct Mosh {
     uint64_t last_input_diag_ms;
     uint64_t last_recv_diag_ms;
     uint64_t last_udp_send_fail_log_ms;
+    uint64_t last_udp_reopen_attempt_ms;
     bool udp_started;
     bool udp_start_queued;
     bool udp_reopen_queued;
@@ -269,7 +270,10 @@ static void mosh_send_idle(Mosh *mosh, unsigned long now)
     if (event.udp_timeout) {
         logevent(mosh->logctx,
                  "Mosh UDP timeout; no server packet received recently");
-        mosh_reopen_udp_socket(mosh);
+        if (mosh_reopen_udp_socket(mosh))
+            mosh->last_udp_reopen_attempt_ms = 0;
+        else
+            mosh->last_udp_reopen_attempt_ms = (uint64_t)now;
     }
     if (event.retransmitted &&
         mosh_interval_due(mosh->last_input_diag_ms, now, 5000U)) {
@@ -331,6 +335,15 @@ static void mosh_timer(void *ctx, unsigned long now)
     if (!mosh->udp_socket) {
         mosh_queue_udp_reopen(mosh);
         return;
+    }
+
+    if (mosh->last_udp_reopen_attempt_ms &&
+        mosh_interval_due(mosh->last_udp_reopen_attempt_ms, now,
+                          MOSH_UDP_REOPEN_RETRY_MS)) {
+        if (mosh_reopen_udp_socket(mosh))
+            mosh->last_udp_reopen_attempt_ms = 0;
+        else
+            mosh->last_udp_reopen_attempt_ms = (uint64_t)now;
     }
 
     mosh_send_assoc_probe(mosh, now);
@@ -561,6 +574,7 @@ static bool mosh_reopen_udp_socket(Mosh *mosh)
     if (old_socket)
         sk_close(old_socket);
     logevent(mosh->logctx, "Mosh UDP socket reopened after timeout");
+    mosh->last_udp_reopen_attempt_ms = 0;
     if (mosh->udp_ready) {
         mosh_send_ack(mosh, GETTICKCOUNT());
         mosh_try_send_pending(mosh);
