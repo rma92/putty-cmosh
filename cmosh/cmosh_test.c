@@ -929,6 +929,16 @@ static void test_client(void)
     check(client.send_seq == 3 && client.server_state == 20 &&
               client.input.acked == 10 && client.echo_timestamp == 0x1111,
           "client init state");
+    check(client.recv_transport.recv_history_count == 1,
+          "client init records initial server seq");
+    {
+        struct cmosh_client badseq_client;
+
+        cmosh_client_init(&badseq_client, key, 10, 20,
+                          CMOSH_CLIENT_NONCE_BASE | 2, 0x1111, 3);
+        check(badseq_client.recv_transport.recv_history_count == 0,
+              "client init ignores non-server initial seq");
+    }
 
     check(cmosh_client_make_ack(&client, 0x2222, packet, sizeof(packet),
                                 &n) == 0 &&
@@ -955,6 +965,32 @@ static void test_client(void)
                                   &n) == 0 &&
               client.input.current == 11 && client.send_seq == 5,
           "client make input");
+    {
+        struct cmosh_client room_client;
+        unsigned char filler[CMOSH_INPUT_MAX_BYTES];
+        uint64_t current, send_seq;
+        size_t nrecords, bytes_len;
+
+        cmosh_client_init(&room_client, key, 1, 5,
+                          CMOSH_SERVER_NONCE_BASE | 10, 0, 7);
+        memset(filler, 'f', sizeof(filler));
+        check(cmosh_input_append_diff(
+                  &room_client.input, filler,
+                  CMOSH_INPUT_MAX_BYTES - 6, 100) == 0,
+              "client input room setup");
+        current = room_client.input.current;
+        send_seq = room_client.send_seq;
+        nrecords = room_client.input.nrecords;
+        bytes_len = room_client.input.bytes_len;
+        check(cmosh_client_make_input(
+                  &room_client, (const unsigned char *)"x", 1, 101, 0x3334,
+                  packet, sizeof(packet), &n) != 0 &&
+                  room_client.input.current == current &&
+                  room_client.send_seq == send_seq &&
+                  room_client.input.nrecords == nrecords &&
+                  room_client.input.bytes_len == bytes_len,
+              "client input room uses encoded diff length");
+    }
     {
         uint64_t current = client.input.current;
         uint64_t send_seq = client.send_seq;

@@ -117,6 +117,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Client input retransmission records now store the encoded user diff, not the raw key bytes. Queue capacity checks must use encoded diff length so packetized input and retained retransmission state agree.
 * PuTTY and standalone `cmosh` may shrink an input chunk when encoded-diff queue space is tight; unsent local bytes must remain pending instead of being dropped or turning queue pressure into a fatal disconnect.
 * Standalone `cmosh` resize attempts that cannot be packetized because the retransmission queue is full are deferred by leaving `last_cols`/`last_rows` unchanged; the resize will be retried after input ACKs free queue space.
+* Client init now only seeds receive replay history from a server nonce-space initial packet. Startup paths should reject authenticated first UDP packets that do not advance server state.
+* PuTTY Mosh caps pre-`MOSH CONNECT` bootstrap output at 64 KiB with overflow-safe accounting; the bootstrap parser only needs the startup lines, so unbounded stderr/stdout is treated as fatal.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
@@ -230,6 +232,10 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after encoded-input retransmission and pending-input chunk shrinking.
 * Latest `cmake --build build --target cmosh --config Debug` passed after standalone pending-input/resize deferral hardening.
 * Latest `cmake --build build --target putty --config Debug` passed after PuTTY pending-input chunk shrinking.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after startup nonce/state and bootstrap-output hardening.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after startup nonce/state and bootstrap-output hardening.
+* Latest `cmake --build build --target cmosh --config Debug` passed after standalone first-server-state validation.
+* Latest `cmake --build build --target putty --config Debug` passed after first-server-state validation and bootstrap-output cap.
 
 ## Known Issues
 

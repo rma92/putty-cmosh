@@ -29,7 +29,8 @@ void cmosh_client_init(struct cmosh_client *client,
     client->echo_timestamp = initial_echo_timestamp;
     cmosh_input_init(&client->input, initial_client_ack);
     cmosh_transport_init(&client->recv_transport);
-    cmosh_transport_note_recv(&client->recv_transport, initial_server_seq);
+    if (initial_server_seq & CMOSH_SERVER_NONCE_BASE)
+        cmosh_transport_note_recv(&client->recv_transport, initial_server_seq);
     cmosh_server_queue_init(&client->server_queue);
 }
 

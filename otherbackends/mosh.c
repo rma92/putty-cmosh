@@ -19,6 +19,7 @@
 #define MOSH_START_ACK_RETRY_MS 250U
 #define MOSH_UDP_REOPEN_RETRY_MS 1000U
 #define MOSH_UDP_SEND_FAIL_LOG_MS 5000U
+#define MOSH_BOOTSTRAP_OUTPUT_MAX 65536U
 
 typedef struct Mosh Mosh;
 
@@ -272,7 +273,7 @@ static void mosh_send_idle(Mosh *mosh, unsigned long now)
         snprintf(msg, sizeof(msg),
                  "Mosh waiting for missing server state current=%llu "
                  "wanted=%llu",
-                 (unsigned long long)event.gap_old_num,
+                 (unsigned long long)mosh->client.server_state,
                  (unsigned long long)event.gap_new_num);
         logevent(mosh->logctx, msg);
     }
@@ -445,6 +446,8 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
             &timestamp, &echo_timestamp, &seq);
 
         if (decode_result != 0)
+            return;
+        if (ti.new_num <= ti.old_num)
             return;
 
         if (cmosh_client_make_start_ack(
@@ -701,6 +704,16 @@ static size_t mosh_bootstrap_output(Seat *seat, SeatOutputType type,
     Mosh *mosh = container_of(seat, Mosh, bootstrap_seat);
 
     if (!mosh->bootstrap.port) {
+        if (len > MOSH_BOOTSTRAP_OUTPUT_MAX ||
+            mosh->bootstrap_output->len >
+                MOSH_BOOTSTRAP_OUTPUT_MAX - len) {
+            mosh->shutdown = true;
+            seat_connection_fatal(
+                mosh->seat,
+                "Mosh SSH bootstrap output exceeded expected limit");
+            seat_notify_remote_disconnect(mosh->seat);
+            return 0;
+        }
         memcpy(strbuf_append(mosh->bootstrap_output, len), data, len);
         if (mosh_parse_bootstrap_output(mosh) &&
             mosh_prepare_udp_target(mosh) && !mosh->udp_start_queued &&

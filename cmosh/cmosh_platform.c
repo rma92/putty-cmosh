@@ -608,6 +608,12 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
             fputs("cmosh: UDP response used client nonce space\n", stderr);
         goto out_socket;
     }
+    if (ti.new_num <= ti.old_num) {
+        if (verbose)
+            fputs("cmosh: UDP response did not advance server state\n",
+                  stderr);
+        goto out_socket;
+    }
 
     if (verbose)
         fprintf(stderr,
