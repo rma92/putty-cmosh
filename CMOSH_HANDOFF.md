@@ -54,6 +54,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Native PuTTY Mosh now treats UDP plug close/error callbacks as local socket failures to recover from: it attempts a UDP socket reopen before reporting a fatal disconnect. Server shutdown still comes from authenticated Mosh transport state.
 * Native PuTTY Mosh now detaches a locally failed UDP socket from the Plug close callback and queues reopen on PuTTY's top-level callback path. If reopen fails because the local network is still unavailable, it keeps the authenticated Mosh state and retries once per second.
 * If a timeout-driven PuTTY UDP reopen fails while the old socket is still present, the backend now retries socket reopen every `MOSH_UDP_REOPEN_RETRY_MS` instead of waiting for the next 30-second UDP-timeout diagnostic.
+* Native PuTTY Mosh now coalesces resize requests that cannot be packetized immediately because the cmosh input retransmission queue is full or because UDP is not ready. The latest cols/rows stay pending until they can be encoded into a retransmittable input state.
+* Pending PuTTY Mosh resize requests preserve ordering against terminal input already accepted by the backend. The backend records how many pending input bytes must be packetized before the resize, then sends the coalesced resize before later input bytes.
 * Native PuTTY Mosh `sendok()` now requires an active UDP socket, so PuTTY applies input backpressure during local UDP outages and wakes the line discipline after a successful reopen.
 * Native PuTTY Mosh now checks the datagram `sk_write()` result. A nonzero return means PuTTY's UDP layer did not send the datagram, including transient buffer-exhaustion cases; retransmitted input is made immediately retryable instead of waiting for the normal retry interval.
 * `cmosh_client_note_idle_send_failed()` rolls back idle/keepalive timing after a failed UDP send, so transient local send failures do not suppress the next keepalive, timeout probe, or retransmit opportunity.
@@ -83,6 +85,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * While the local UDP socket is absent, do not advertise backend send readiness even if the authenticated Mosh session is still logically established.
 * A packet is not considered sent merely because it was encoded. If UDP send reports failure, rollback keepalive timing and, for input-bearing retransmits, make the affected input state immediately retryable.
 * If local UDP sending is failing, do not continue draining the PuTTY-side pending-input buffer into more cmosh states in the same loop; stop after the failed datagram and let normal retry/backpressure resume.
+* A PuTTY resize event accepted by the backend must either remain in `pending_resize` or be encoded into cmosh retransmission state. Do not silently drop resize updates just because the input retransmission queue is temporarily full.
+* Pending PuTTY resize updates are ordered after input bytes already accepted into the backend and before later pending input bytes. Multiple resize events coalesce to the latest cols/rows at that ordering point.
 * Do not use unsigned elapsed-time subtraction unless the current timestamp is known to be at least the stored timestamp; backwards time is not evidence that retransmit or timeout is due.
 * Do not add a received sequence to replay history until the decrypted packet is structurally valid enough to be consumed. Partial fragments are recorded after a valid fragment is accepted into assembly.
 * Stateful client receive only accepts server nonce-space packets. Reflected client packets must not affect replay, fragment reassembly, ACK, or terminal state.
@@ -175,6 +179,10 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target otherbackends --config Debug` passed after timeout-driven UDP reopen retry hardening.
 * Latest `cmake --build build --target cmosh --config Debug` passed after standalone ACK send-failure handling.
 * Latest `cmake --build build --target putty --config Debug` passed after timeout-driven UDP reopen retry hardening.
+* Latest `cmake --build build --target otherbackends --config Debug` passed after pending resize coalescing/retry hardening.
+* Latest `cmake --build build --target putty --config Debug` passed after pending resize coalescing/retry hardening.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after pending resize coalescing/retry hardening.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after pending resize coalescing/retry hardening.
 
 ## Known Issues
 
@@ -185,4 +193,4 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 
 ## Exact Next Step
 
-Retest the freshly rebuilt `build\Debug\putty.exe` on a high-latency/lossy connection. Focus sleep/wake, local network loss/recovery, paste bursts, startup UDP establishment, rapid command-history navigation immediately after login, and any large/fragmented screen updates. Watch for the throttled `Mosh UDP send failed locally...` Event Log line. If repeated characters persist, compare Event Log retransmit lines against the `Mosh server input ACK ...` lines to see whether repeats occur before the server ACK/throwaway transition or after already-trimmed input state.
+Retest the freshly rebuilt `build\Debug\putty.exe` on a high-latency/lossy connection. Focus sleep/wake, local network loss/recovery, paste bursts, startup UDP establishment, rapid command-history navigation immediately after login, rapid resize/maximize/restore under load, and any large/fragmented screen updates. Watch for the throttled `Mosh UDP send failed locally...` Event Log line. If repeated characters persist, compare Event Log retransmit lines against the `Mosh server input ACK ...` lines to see whether repeats occur before the server ACK/throwaway transition or after already-trimmed input state.

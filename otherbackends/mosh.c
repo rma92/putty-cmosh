@@ -45,6 +45,7 @@ struct Mosh {
     char *bootstrap_command;
     char *ssh_host;
     unsigned int cols, rows;
+    size_t pending_resize_after_input_len;
     int exitcode;
     uint64_t last_assoc_probe_ms;
     uint64_t last_input_diag_ms;
@@ -59,6 +60,7 @@ struct Mosh {
     bool remote_exited;
     bool shutdown;
     bool udp_target_ready;
+    bool pending_resize;
     bool logged_state_only_output;
 };
 
@@ -69,6 +71,7 @@ static bool mosh_reopen_udp_socket(Mosh *mosh);
 static void mosh_queue_udp_reopen(Mosh *mosh);
 static bool mosh_start_udp(Mosh *mosh);
 static void mosh_start_udp_callback(void *ctx);
+static bool mosh_try_send_resize(Mosh *mosh, uint64_t now);
 static void mosh_try_send_pending(Mosh *mosh);
 static bool mosh_sendok(Backend *be);
 
@@ -970,6 +973,12 @@ static void mosh_consume_pending_input(Mosh *mosh, size_t len)
 {
     if (!len || !mosh->pending_input)
         return;
+    if (mosh->pending_resize_after_input_len) {
+        if (len >= mosh->pending_resize_after_input_len)
+            mosh->pending_resize_after_input_len = 0;
+        else
+            mosh->pending_resize_after_input_len -= len;
+    }
     if (len >= mosh->pending_input->len) {
         strbuf_clear(mosh->pending_input);
         return;
@@ -977,6 +986,32 @@ static void mosh_consume_pending_input(Mosh *mosh, size_t len)
     memmove(mosh->pending_input->u, mosh->pending_input->u + len,
             mosh->pending_input->len - len);
     strbuf_shrink_to(mosh->pending_input, mosh->pending_input->len - len);
+}
+
+static bool mosh_try_send_resize(Mosh *mosh, uint64_t now)
+{
+    unsigned char packet[CMOSH_MAX_PACKET];
+    size_t packet_len = 0;
+
+    if (!mosh->pending_resize)
+        return true;
+    if (mosh->pending_resize_after_input_len)
+        return true;
+    if (!mosh->udp_ready || mosh->shutdown || !mosh->udp_socket)
+        return false;
+
+    if (cmosh_client_make_resize(&mosh->client, mosh->cols, mosh->rows,
+                                 now, mosh_now16((unsigned long)now),
+                                 packet, sizeof(packet), &packet_len) != 0)
+        return false;
+
+    mosh->pending_resize = false;
+    if (!mosh_udp_send(mosh, packet, packet_len)) {
+        cmosh_client_note_input_send_failed(
+            &mosh->client, mosh->client.input.current, now);
+        return false;
+    }
+    return true;
 }
 
 static void mosh_try_send_pending(Mosh *mosh)
@@ -992,11 +1027,17 @@ static void mosh_try_send_pending(Mosh *mosh)
         size_t chunk = mosh->pending_input->len;
         size_t room;
 
+        if (mosh->pending_resize && !mosh->pending_resize_after_input_len &&
+            !mosh_try_send_resize(mosh, now))
+            return;
         if (mosh->client.input.nrecords >= CMOSH_INPUT_MAX_RECORDS)
             return;
         room = CMOSH_INPUT_MAX_BYTES - mosh->client.input.bytes_len;
         if (!room)
             return;
+        if (mosh->pending_resize_after_input_len &&
+            chunk > mosh->pending_resize_after_input_len)
+            chunk = mosh->pending_resize_after_input_len;
         if (chunk > room)
             chunk = room;
         if (chunk > CMOSH_CLIENT_INPUT_CHUNK_MAX)
@@ -1016,6 +1057,7 @@ static void mosh_try_send_pending(Mosh *mosh)
         }
         mosh_consume_pending_input(mosh, chunk);
     }
+    mosh_try_send_resize(mosh, now);
 }
 
 static void mosh_send(Backend *be, const char *buf, size_t len)
@@ -1047,24 +1089,19 @@ static size_t mosh_sendbuffer(Backend *be)
 static void mosh_size(Backend *be, int width, int height)
 {
     Mosh *mosh = container_of(be, Mosh, backend);
-    unsigned char packet[CMOSH_MAX_PACKET];
-    size_t packet_len = 0;
-    unsigned long now;
 
     mosh->cols = width > 0 ? (unsigned int)width : 80;
     mosh->rows = height > 0 ? (unsigned int)height : 24;
 
+    if (!mosh->pending_resize) {
+        mosh->pending_resize = true;
+        mosh->pending_resize_after_input_len = mosh->pending_input->len;
+    }
+
     if (!mosh->udp_ready || mosh->shutdown)
         return;
 
-    now = GETTICKCOUNT();
-    if (cmosh_client_make_resize(&mosh->client, mosh->cols, mosh->rows,
-                                 (uint64_t)now, mosh_now16(now), packet,
-                                 sizeof(packet), &packet_len) == 0) {
-        if (!mosh_udp_send(mosh, packet, packet_len))
-            cmosh_client_note_input_send_failed(
-                &mosh->client, mosh->client.input.current, (uint64_t)now);
-    }
+    mosh_try_send_pending(mosh);
 }
 
 static void mosh_special(Backend *be, SessionSpecialCode code, int arg)
