@@ -207,9 +207,13 @@ static int mosh_host_output(void *vctx, const unsigned char *diff,
 static bool mosh_udp_send(Mosh *mosh, const unsigned char *packet,
                           size_t packet_len)
 {
+    size_t backlog;
+
     if (!mosh->udp_socket || mosh->shutdown)
         return false;
-    sk_write(mosh->udp_socket, packet, packet_len);
+    backlog = sk_write(mosh->udp_socket, packet, packet_len);
+    if (backlog)
+        return false;
     return true;
 }
 
@@ -253,10 +257,12 @@ static void mosh_send_idle(Mosh *mosh, unsigned long now)
         logevent(mosh->logctx, msg);
         mosh->last_input_diag_ms = (uint64_t)now;
     }
-    if (packet_len && !mosh_udp_send(mosh, packet, packet_len) &&
-        event.retransmitted)
-        cmosh_client_note_input_send_failed(
-            &mosh->client, event.retransmit_state, (uint64_t)now);
+    if (packet_len && !mosh_udp_send(mosh, packet, packet_len)) {
+        cmosh_client_note_idle_send_failed(&mosh->client);
+        if (event.retransmitted)
+            cmosh_client_note_input_send_failed(
+                &mosh->client, event.retransmit_state, (uint64_t)now);
+    }
     mosh_try_send_pending(mosh);
 }
 

@@ -264,6 +264,12 @@ void cmosh_client_note_input_send_failed(struct cmosh_client *client,
     }
 }
 
+void cmosh_client_note_idle_send_failed(struct cmosh_client *client)
+{
+    if (client)
+        client->last_idle_sent_ms = UINT64_MAX;
+}
+
 enum cmosh_client_recv_result cmosh_client_recv_packet(
     struct cmosh_client *client, const unsigned char *packet,
     size_t packet_len, struct cmosh_transport_instruction *ti,

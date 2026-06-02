@@ -112,6 +112,7 @@ int cmosh_client_make_idle_event(struct cmosh_client *client, uint64_t now_ms,
                                  struct cmosh_client_idle_event *event);
 void cmosh_client_note_input_send_failed(struct cmosh_client *client,
                                          uint64_t state, uint64_t now_ms);
+void cmosh_client_note_idle_send_failed(struct cmosh_client *client);
 enum cmosh_client_recv_result cmosh_client_recv_packet(
     struct cmosh_client *client, const unsigned char *packet,
     size_t packet_len, struct cmosh_transport_instruction *ti,

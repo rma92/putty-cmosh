@@ -925,12 +925,15 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                         s, packet, packet_len, verbose);
                                     if (send_result < 0)
                                         goto out_socket;
-                                    if (send_result > 0 &&
-                                        idle_event.retransmitted)
-                                        cmosh_client_note_input_send_failed(
-                                            &client,
-                                            idle_event.retransmit_state,
-                                            now_ms);
+                                    if (send_result > 0) {
+                                        cmosh_client_note_idle_send_failed(
+                                            &client);
+                                        if (idle_event.retransmitted)
+                                            cmosh_client_note_input_send_failed(
+                                                &client,
+                                                idle_event.retransmit_state,
+                                                now_ms);
+                                    }
                                 }
                                 if (packet_len && verbose) {
                                     fprintf(stderr,

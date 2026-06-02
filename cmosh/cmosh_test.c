@@ -901,6 +901,29 @@ static void test_client(void)
 
     cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 10,
                       0, 6);
+    {
+        struct cmosh_client_idle_event idle_event;
+
+        check(cmosh_client_make_idle_event(&client, 100, 0x5100, packet,
+                                           sizeof(packet), &n,
+                                           &idle_event) == 0 &&
+                  n != 0 && !idle_event.retransmitted,
+              "client idle packet setup");
+        check(cmosh_client_make_idle_event(&client, 100, 0x5101, packet,
+                                           sizeof(packet), &n,
+                                           &idle_event) == 0 &&
+                  n == 0,
+              "client idle packet is rate limited");
+        cmosh_client_note_idle_send_failed(&client);
+        check(cmosh_client_make_idle_event(&client, 100, 0x5102, packet,
+                                           sizeof(packet), &n,
+                                           &idle_event) == 0 &&
+                  n != 0 && !idle_event.retransmitted,
+              "client idle send failure makes keepalive retry due");
+    }
+
+    cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 10,
+                      0, 6);
     check(cmosh_client_make_input(&client, (const unsigned char *)"x", 1,
                                   100, 0x5200, packet, sizeof(packet),
                                   &n) == 0,

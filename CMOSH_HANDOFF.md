@@ -54,6 +54,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Native PuTTY Mosh now treats UDP plug close/error callbacks as local socket failures to recover from: it attempts a UDP socket reopen before reporting a fatal disconnect. Server shutdown still comes from authenticated Mosh transport state.
 * Native PuTTY Mosh now detaches a locally failed UDP socket from the Plug close callback and queues reopen on PuTTY's top-level callback path. If reopen fails because the local network is still unavailable, it keeps the authenticated Mosh state and retries once per second.
 * Native PuTTY Mosh `sendok()` now requires an active UDP socket, so PuTTY applies input backpressure during local UDP outages and wakes the line discipline after a successful reopen.
+* Native PuTTY Mosh now checks the datagram `sk_write()` result. A nonzero return means PuTTY's UDP layer did not send the datagram, including transient buffer-exhaustion cases; retransmitted input is made immediately retryable instead of waiting for the normal retry interval.
+* `cmosh_client_note_idle_send_failed()` rolls back idle/keepalive timing after a failed UDP send, so transient local send failures do not suppress the next keepalive, timeout probe, or retransmit opportunity.
 
 ## Protocol Invariants
 
@@ -65,6 +67,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * A local UDP socket close/error is not equivalent to remote exit for Mosh; reopen locally and send a fresh datagram to re-establish the path.
 * Reopening a local UDP socket must not run recursively inside the socket close notification. Close/detach the failed socket, queue a top-level reopen, and keep retrying without discarding authenticated transport/input state.
 * While the local UDP socket is absent, do not advertise backend send readiness even if the authenticated Mosh session is still logically established.
+* A packet is not considered sent merely because it was encoded. If UDP send reports failure, rollback keepalive timing and, for input-bearing retransmits, make the affected input state immediately retryable.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
@@ -113,14 +116,17 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target otherbackends --config Debug` passed after queued UDP close/reopen retry hardening.
 * Latest `cmake --build build --target putty --config Debug` compiled `mosh.c` but failed to relink because `build\Debug\putty.exe` was open/locked: `LNK1168: cannot open ... putty.exe for writing`.
 * Latest `cmake --build build --target otherbackends --config Debug` passed after UDP-outage `sendok()` backpressure.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after UDP datagram send-result handling and idle send-failure rollback.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after UDP datagram send-result handling and idle send-failure rollback.
+* Latest `cmake --build build --target putty --config Debug` passed after UDP datagram send-result handling and idle send-failure rollback.
 
 ## Known Issues
 
 * Full terminal correctness is not complete; output still depends on raw host-output decoding instead of a full Mosh terminal-state model.
 * High-latency or lossy links may still show repeated characters; throwaway handling and resize retransmission are only mitigations.
-* Sleep/wake and interface changes should now survive transient local UDP socket close/reopen failures better, but still need live testing on Windows after closing the currently running `putty.exe` so the rebuilt executable can link.
+* Sleep/wake and interface changes should now survive transient local UDP socket close/reopen failures better, but still need live Windows testing with the freshly rebuilt `build\Debug\putty.exe`.
 * Up-arrow-after-login issue still needs investigation if it persists after the UTF-8/default rebuild; likely candidates are startup tty modes or local line discipline state before UDP readiness.
 
 ## Exact Next Step
 
-Close any running `build\Debug\putty.exe`, rebuild `cmake --build build --target putty --config Debug`, then retest on a high-latency/lossy connection. Focus sleep/wake, local network loss/recovery, paste bursts, startup UDP establishment, and rapid command-history navigation immediately after login. If repeated characters persist, compare Event Log retransmit lines against the new `Mosh server input ACK ...` lines to see whether repeats occur before the server ACK/throwaway transition or after already-trimmed input state.
+Retest the freshly rebuilt `build\Debug\putty.exe` on a high-latency/lossy connection. Focus sleep/wake, local network loss/recovery, paste bursts, startup UDP establishment, and rapid command-history navigation immediately after login. If repeated characters persist, compare Event Log retransmit lines against the new `Mosh server input ACK ...` lines to see whether repeats occur before the server ACK/throwaway transition or after already-trimmed input state.
