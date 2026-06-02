@@ -658,7 +658,8 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                     key, packet, packet_len, &ti, post_ack_diff,
                     sizeof(post_ack_diff), &post_ack_ts, &post_ack_echo_ts,
                     &seq) == 0 &&
-                (seq & CMOSH_SERVER_NONCE_BASE) != 0) {
+                (seq & CMOSH_SERVER_NONCE_BASE) != 0 &&
+                ti.new_num > ti.old_num) {
                     if (verbose)
                         fprintf(stderr,
                                 "cmosh: received post-ACK transport packet "

@@ -74,6 +74,12 @@ static void test_base64(void)
           "base64 encode padded");
     check(cmosh_base64_decode("!!!!", out, sizeof(out), &n) != 0,
           "base64 rejects invalid input");
+    check(cmosh_base64_decode("TQ", out, sizeof(out), &n) != 0,
+          "base64 rejects truncated unpadded input");
+    check(cmosh_base64_decode("T===", out, sizeof(out), &n) != 0,
+          "base64 rejects excessive padding");
+    check(cmosh_base64_decode("T=Fu", out, sizeof(out), &n) != 0,
+          "base64 rejects data after padding");
 }
 
 static void test_aes_ocb(void)
@@ -158,10 +164,20 @@ static void test_bootstrap(void)
 static void test_proto(void)
 {
     unsigned char buf[64];
+    const unsigned char varint_overflow[] =
+        "\xff\xff\xff\xff\xff\xff\xff\xff\xff\x02";
     size_t n;
+    size_t pos;
+    uint64_t value;
     struct cmosh_user_input msg;
     struct cmosh_transport_instruction ti, ti2;
     const unsigned char diff[] = "d";
+
+    pos = 0;
+    check(cmosh_pb_get_varint(varint_overflow,
+                              sizeof(varint_overflow) - 1, &pos,
+                              &value) != 0,
+          "decode varint rejects uint64 overflow");
 
     memset(&msg, 0, sizeof(msg));
     msg.frame_id = 150;
@@ -198,6 +214,27 @@ static void test_proto(void)
               ti2.new_num == 1 && ti2.ack_num == 2 && ti2.diff_len == 1 &&
               ti2.diff[0] == 'd',
           "decode transport instruction");
+    {
+        unsigned char with_unknown[32];
+        size_t m = 0;
+
+        memcpy(with_unknown, buf, n);
+        m = n;
+        check(cmosh_pb_put_varint(with_unknown, sizeof(with_unknown), &m,
+                                  (9U << 3) | 5) == 0,
+              "encode unknown fixed32 transport field key");
+        memset(with_unknown + m, 0xa5, 4);
+        m += 4;
+        check(cmosh_decode_transport_instruction(
+                  with_unknown, m, &ti2, NULL, NULL) == 0 &&
+                  ti2.protocol_version == CMOSH_PROTOCOL_VERSION &&
+                  ti2.new_num == 1 && ti2.diff_len == 1,
+              "decode transport skips unknown fixed32 field");
+        with_unknown[0] = 0;
+        check(cmosh_decode_transport_instruction(
+                  with_unknown, m, &ti2, NULL, NULL) != 0,
+              "decode transport rejects field zero");
+    }
 
     check(cmosh_encode_user_resize_message(80, 24, buf, sizeof(buf), &n) == 0,
           "encode user resize message");

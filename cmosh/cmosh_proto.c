@@ -39,6 +39,8 @@ int cmosh_pb_get_varint(const unsigned char *buf, size_t buflen, size_t *pos,
         return -1;
     while (*pos < buflen && shift < 64) {
         unsigned char b = buf[(*pos)++];
+        if (shift == 63 && (b & 0x7e) != 0)
+            return -1;
         result |= (uint64_t)(b & 0x7f) << shift;
         if (!(b & 0x80)) {
             *value = result;
@@ -135,6 +137,8 @@ int cmosh_decode_transport_instruction(const unsigned char *buf, size_t buflen,
             return -1;
         field = (unsigned int)(key >> 3);
         wire_type = (unsigned int)(key & 7);
+        if (field == 0)
+            return -1;
 
         if (wire_type == 0) {
             if (cmosh_pb_get_varint(buf, buflen, &pos, &value) != 0)
@@ -163,6 +167,14 @@ int cmosh_decode_transport_instruction(const unsigned char *buf, size_t buflen,
                     *chaff = buf + pos;
             }
             pos += (size_t)len;
+        } else if (wire_type == 1) {
+            if (pos + 8 > buflen)
+                return -1;
+            pos += 8;
+        } else if (wire_type == 5) {
+            if (pos + 4 > buflen)
+                return -1;
+            pos += 4;
         } else {
             return -1;
         }

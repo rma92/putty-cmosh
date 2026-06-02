@@ -119,6 +119,9 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Standalone `cmosh` resize attempts that cannot be packetized because the retransmission queue is full are deferred by leaving `last_cols`/`last_rows` unchanged; the resize will be retried after input ACKs free queue space.
 * Client init now only seeds receive replay history from a server nonce-space initial packet. Startup paths should reject authenticated first UDP packets that do not advance server state.
 * PuTTY Mosh caps pre-`MOSH CONNECT` bootstrap output at 64 KiB with overflow-safe accounting; the bootstrap parser only needs the startup lines, so unbounded stderr/stdout is treated as fatal.
+* Base64 bootstrap key decoding now rejects truncated unpadded input, excessive padding, and data after padding. Mosh server keys should be canonical padded base64.
+* Protobuf varint decoding rejects uint64 overflow, transport instructions reject field 0, and unknown fixed32/fixed64 transport fields are skipped instead of dropping otherwise valid packets.
+* Standalone `cmosh` ignores optional post-start-ACK packets that do not advance server state and falls back to the first authenticated server state.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
@@ -236,6 +239,10 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after startup nonce/state and bootstrap-output hardening.
 * Latest `cmake --build build --target cmosh --config Debug` passed after standalone first-server-state validation.
 * Latest `cmake --build build --target putty --config Debug` passed after first-server-state validation and bootstrap-output cap.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after base64/protobuf parser hardening and standalone post-ACK state validation.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after base64/protobuf parser hardening and standalone post-ACK state validation.
+* Latest `cmake --build build --target cmosh --config Debug` passed after base64/protobuf parser hardening and standalone post-ACK state validation.
+* Latest `cmake --build build --target putty --config Debug` passed after base64/protobuf parser hardening and standalone post-ACK state validation.
 
 ## Known Issues
 

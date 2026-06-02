@@ -20,7 +20,7 @@ static int b64_value(unsigned char c)
 int cmosh_base64_decode(const char *in, unsigned char *out, size_t outlen,
                         size_t *written)
 {
-    size_t i, n = 0;
+    size_t i, n = 0, data_chars = 0, pad_chars = 0;
     int val = 0, valb = -8;
 
     if (!in || !out || !written)
@@ -35,6 +35,7 @@ int cmosh_base64_decode(const char *in, unsigned char *out, size_t outlen,
         d = b64_value(c);
         if (d < 0)
             return -1;
+        data_chars++;
         val = (val << 6) | d;
         valb += 6;
         if (valb >= 0) {
@@ -45,9 +46,17 @@ int cmosh_base64_decode(const char *in, unsigned char *out, size_t outlen,
         }
     }
 
-    while (in[i] == '=')
+    while (in[i] == '=') {
+        pad_chars++;
         i++;
+    }
     if (in[i] != '\0')
+        return -1;
+    if (data_chars % 4 == 1 || pad_chars > 2)
+        return -1;
+    if (pad_chars && (data_chars + pad_chars) % 4 != 0)
+        return -1;
+    if (!pad_chars && data_chars % 4 != 0)
         return -1;
 
     *written = n;
