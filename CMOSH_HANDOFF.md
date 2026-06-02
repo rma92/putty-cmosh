@@ -88,6 +88,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * A queued server diff must advance state, and the same state transition must have stable bytes if it is seen more than once.
 * Input ACK/throwaway trimming is committed by the high-level receive path only after server-state validation. Bad authenticated state transitions must not discard queued input.
 * Stale overlapping display diffs cannot be applied from the current server state and must not consume future-diff queue slots.
+* A duplicate server packet may still be useful if a prior output callback failure left an applicable server diff queued. The high-level receive path now retries queued applicable diffs on duplicate packets, while preserving duplicate classification for callers. PuTTY and standalone `cmosh` duplicate handling must still honor server shutdown after such a retry.
+* While reassembling fragmented transport instructions, an older fragment ID must not clear a newer in-progress fragmented instruction. Newer IDs may still supersede older incomplete assemblies.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
@@ -153,6 +155,12 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after validated ACK commit and stale-overlap hardening.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after validated ACK commit and stale-overlap hardening.
 * Latest `cmake --build build --target putty --config Debug` passed after validated ACK commit and stale-overlap hardening.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after duplicate-drain and stale-fragment hardening.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after duplicate-drain and stale-fragment hardening.
+* Latest `cmake --build build --target putty --config Debug` passed after duplicate-drain and stale-fragment hardening.
+* Latest `cmake --build build --target cmosh --config Debug` passed after standalone duplicate-drain shutdown handling.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after standalone duplicate-drain shutdown handling.
+* Latest `cmake --build build --target putty --config Debug` passed after standalone duplicate-drain shutdown handling.
 
 ## Known Issues
 
@@ -163,4 +171,4 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 
 ## Exact Next Step
 
-Retest the freshly rebuilt `build\Debug\putty.exe` on a high-latency/lossy connection. Focus sleep/wake, local network loss/recovery, paste bursts, startup UDP establishment, and rapid command-history navigation immediately after login. Watch for the new throttled `Mosh UDP send failed locally...` Event Log line. If repeated characters persist, compare Event Log retransmit lines against the `Mosh server input ACK ...` lines to see whether repeats occur before the server ACK/throwaway transition or after already-trimmed input state.
+Retest the freshly rebuilt `build\Debug\putty.exe` on a high-latency/lossy connection. Focus sleep/wake, local network loss/recovery, paste bursts, startup UDP establishment, rapid command-history navigation immediately after login, and any large/fragmented screen updates. Watch for the throttled `Mosh UDP send failed locally...` Event Log line. If repeated characters persist, compare Event Log retransmit lines against the `Mosh server input ACK ...` lines to see whether repeats occur before the server ACK/throwaway transition or after already-trimmed input state.

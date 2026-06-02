@@ -799,6 +799,13 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                         CMOSH_CLIENT_RECV_DUPLICATE) {
                                         cmosh_client_note_recv_time(
                                             &client, cmosh_now_ms());
+                                        if (event.server_shutdown) {
+                                            if (verbose)
+                                                fputs("cmosh: server "
+                                                      "shutdown\n", stderr);
+                                            rc = 0;
+                                            goto out_socket;
+                                        }
                                         if (verbose)
                                             fprintf(stderr,
                                                     "cmosh: ignored duplicate "

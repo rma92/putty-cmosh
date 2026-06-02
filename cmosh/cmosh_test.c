@@ -590,6 +590,59 @@ static void test_transport(void)
                   sizeof(diff_copy), &timestamp, &echo_timestamp, &seq) < 0 &&
                   !st.fragment_active,
               "transport clears conflicting fragment state");
+
+        cmosh_transport_clear(&st);
+        check(cmosh_encode_fragment(102, 0, 0, compressed, split,
+                                    fragment, sizeof(fragment),
+                                    &fragment_len) == 0,
+              "encode newer first transport fragment");
+        memcpy(plain2 + 4, fragment, fragment_len);
+        plain_len = fragment_len + 4;
+        check(cmosh_transport_encrypt_packet(
+                  key, CMOSH_SERVER_NONCE_BASE | 45, plain2, plain_len,
+                  packet2, sizeof(packet2), &n) == 0,
+              "encrypt newer first transport fragment");
+        memset(&ti, 0, sizeof(ti));
+        check(cmosh_transport_decode_packet_state(
+                  &st, key, packet2, n, &ti, diff_copy,
+                  sizeof(diff_copy), &timestamp, &echo_timestamp, &seq) == 1,
+              "transport waits for newer fragment");
+        check(cmosh_encode_fragment(101, 0, 0, compressed, split,
+                                    fragment, sizeof(fragment),
+                                    &fragment_len) == 0,
+              "encode older stale transport fragment");
+        memcpy(plain2 + 4, fragment, fragment_len);
+        plain_len = fragment_len + 4;
+        check(cmosh_transport_encrypt_packet(
+                  key, CMOSH_SERVER_NONCE_BASE | 46, plain2, plain_len,
+                  packet2, sizeof(packet2), &n) == 0,
+              "encrypt older stale transport fragment");
+        memset(&ti, 0, sizeof(ti));
+        check(cmosh_transport_decode_packet_state(
+                  &st, key, packet2, n, &ti, diff_copy,
+                  sizeof(diff_copy), &timestamp, &echo_timestamp, &seq) == 1 &&
+                  st.fragment_active && st.fragment_id == 102,
+              "transport ignores older stale fragment");
+        check(cmosh_encode_fragment(102, 1, 1, compressed + split,
+                                    compressed_len - split, fragment,
+                                    sizeof(fragment), &fragment_len) == 0,
+              "encode newer final transport fragment");
+        memcpy(plain2 + 4, fragment, fragment_len);
+        plain_len = fragment_len + 4;
+        check(cmosh_transport_encrypt_packet(
+                  key, CMOSH_SERVER_NONCE_BASE | 47, plain2, plain_len,
+                  packet2, sizeof(packet2), &n) == 0,
+              "encrypt newer final transport fragment");
+        memset(&ti, 0, sizeof(ti));
+        memset(diff_copy, 0, sizeof(diff_copy));
+        check(cmosh_transport_decode_packet_state(
+                  &st, key, packet2, n, &ti, diff_copy,
+                  sizeof(diff_copy), &timestamp, &echo_timestamp, &seq) == 0 &&
+                  ti.old_num == 4 && ti.new_num == 5 &&
+                  ti.ack_num == 6 && ti.diff_len == sizeof(fdiff) &&
+                  memcmp(diff_copy, fdiff, sizeof(fdiff)) == 0 &&
+                  !st.fragment_active,
+              "transport completes newer fragment after stale older fragment");
         cmosh_transport_clear(&st);
     }
 }
@@ -687,6 +740,25 @@ static int test_output_callback(void *vctx, const unsigned char *diff,
     memcpy(sink->bytes + sink->len, diff, diff_len);
     sink->len += diff_len;
     return 0;
+}
+
+struct test_output_fail_once_ctx {
+    struct test_output_sink *sink;
+    int failed;
+};
+
+static int test_output_fail_once_callback(void *vctx,
+                                          const unsigned char *diff,
+                                          size_t diff_len)
+{
+    struct test_output_fail_once_ctx *ctx =
+        (struct test_output_fail_once_ctx *)vctx;
+
+    if (!ctx->failed) {
+        ctx->failed = 1;
+        return -1;
+    }
+    return test_output_callback(ctx->sink, diff, diff_len);
 }
 
 static int make_test_transport_packet(
@@ -1121,6 +1193,37 @@ static void test_client(void)
                   CMOSH_CLIENT_RECV_DUPLICATE &&
               event.result == CMOSH_CLIENT_RECV_DUPLICATE,
               "client process duplicate");
+    }
+
+    cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 40,
+                      0, 7);
+    memset(&sink, 0, sizeof(sink));
+    check(cmosh_transport_make_packet(key, CMOSH_SERVER_NONCE_BASE | 41,
+                                      5, 6, 1,
+                                      (const unsigned char *)"r", 1, 0x5566,
+                                      0, packet, sizeof(packet), &n) == 0,
+          "client process retry output packet source");
+    {
+        struct cmosh_client_recv_event event;
+        struct test_output_fail_once_ctx fail_ctx;
+
+        fail_ctx.sink = &sink;
+        fail_ctx.failed = 0;
+        check(cmosh_client_process_packet(
+                  &client, packet, n, diff, sizeof(diff),
+                  test_output_fail_once_callback, &fail_ctx, &event) ==
+                  CMOSH_CLIENT_RECV_BAD_PACKET &&
+              client.server_state == 5 && sink.len == 0,
+              "client output failure retains queued diff");
+        check(cmosh_client_process_packet(
+                  &client, packet, n, diff, sizeof(diff),
+                  test_output_fail_once_callback, &fail_ctx, &event) ==
+                  CMOSH_CLIENT_RECV_DUPLICATE &&
+              event.result == CMOSH_CLIENT_RECV_DUPLICATE &&
+              event.should_ack && event.previous_server_state == 5 &&
+              client.server_state == 6 && sink.len == 1 &&
+              sink.bytes[0] == 'r',
+              "client duplicate retries retained queued diff");
     }
 
     cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 20,

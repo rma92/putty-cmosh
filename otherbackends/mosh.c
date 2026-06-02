@@ -433,7 +433,17 @@ static void mosh_udp_receive(Plug *plug, int urgent, const char *data,
     }
     if (event.result == CMOSH_CLIENT_RECV_DUPLICATE) {
         cmosh_client_note_recv_time(&mosh->client, (uint64_t)GETTICKCOUNT());
+        if (event.server_shutdown) {
+            mosh->shutdown = true;
+            mosh->exitcode = 0;
+            seat_notify_remote_exit(mosh->seat);
+            seat_notify_remote_disconnect(mosh->seat);
+            return;
+        }
         mosh_send_ack(mosh, GETTICKCOUNT());
+        mosh_try_send_pending(mosh);
+        if (mosh->ldisc && mosh_sendok(&mosh->backend))
+            ldisc_check_sendok(mosh->ldisc);
         return;
     }
 

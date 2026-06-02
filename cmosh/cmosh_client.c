@@ -338,6 +338,30 @@ enum cmosh_client_recv_result cmosh_client_process_packet(
         event->input_bytes_before = input_bytes_before;
         event->diff_len = ti.diff_len;
     }
+    if (result == CMOSH_CLIENT_RECV_DUPLICATE) {
+        previous_server_state = client ? client->server_state : 0;
+        if (client && output &&
+            cmosh_client_apply_server_diffs(client, output, ctx) != 0) {
+            if (event)
+                event->result = CMOSH_CLIENT_RECV_BAD_PACKET;
+            return CMOSH_CLIENT_RECV_BAD_PACKET;
+        }
+        if (event) {
+            event->previous_server_state = previous_server_state;
+            event->server_shutdown =
+                client && client->server_state ==
+                CMOSH_CLIENT_SERVER_SHUTDOWN_STATE;
+            event->should_ack =
+                client && client->server_state > previous_server_state;
+            if (client) {
+                event->input_acked_after = client->input.acked;
+                event->input_current = client->input.current;
+                event->input_records_after = client->input.nrecords;
+                event->input_bytes_after = client->input.bytes_len;
+            }
+        }
+        return result;
+    }
     if (result != CMOSH_CLIENT_RECV_OK)
         return result;
 

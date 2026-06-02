@@ -170,6 +170,10 @@ static int cmosh_transport_reassemble_fragment(
         frag->index >= CMOSH_TRANSPORT_FRAGMENT_MAX)
         return -1;
 
+    if (st->fragment_active && st->fragment_id != frag->id &&
+        frag->id < st->fragment_id)
+        return 1;
+
     if (!st->fragment_active || st->fragment_id != frag->id) {
         cmosh_transport_clear(st);
         st->fragment_active = 1;
