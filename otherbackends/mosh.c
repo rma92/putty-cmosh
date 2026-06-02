@@ -17,6 +17,7 @@
 
 #define MOSH_ASSOC_RETRY_MS 1000U
 #define MOSH_UDP_REOPEN_RETRY_MS 1000U
+#define MOSH_UDP_SEND_FAIL_LOG_MS 5000U
 
 typedef struct Mosh Mosh;
 
@@ -48,6 +49,7 @@ struct Mosh {
     uint64_t last_assoc_probe_ms;
     uint64_t last_input_diag_ms;
     uint64_t last_recv_diag_ms;
+    uint64_t last_udp_send_fail_log_ms;
     bool udp_started;
     bool udp_start_queued;
     bool udp_reopen_queued;
@@ -208,12 +210,23 @@ static bool mosh_udp_send(Mosh *mosh, const unsigned char *packet,
                           size_t packet_len)
 {
     size_t backlog;
+    unsigned long now;
 
     if (!mosh->udp_socket || mosh->shutdown)
         return false;
     backlog = sk_write(mosh->udp_socket, packet, packet_len);
-    if (backlog)
+    if (backlog) {
+        now = GETTICKCOUNT();
+        if (!mosh->last_udp_send_fail_log_ms ||
+            (uint64_t)now - mosh->last_udp_send_fail_log_ms >=
+                MOSH_UDP_SEND_FAIL_LOG_MS) {
+            logevent(mosh->logctx,
+                     "Mosh UDP send failed locally; packet will be retried "
+                     "if it carries retransmittable state");
+            mosh->last_udp_send_fail_log_ms = (uint64_t)now;
+        }
         return false;
+    }
     return true;
 }
 
@@ -274,8 +287,10 @@ static void mosh_send_assoc_probe(Mosh *mosh, unsigned long now)
     if (mosh->last_assoc_probe_ms &&
         (uint64_t)now - mosh->last_assoc_probe_ms < MOSH_ASSOC_RETRY_MS)
         return;
-    mosh_udp_send(mosh, mosh->initial_packet, mosh->initial_packet_len);
-    mosh->last_assoc_probe_ms = (uint64_t)now;
+    if (mosh_udp_send(mosh, mosh->initial_packet, mosh->initial_packet_len))
+        mosh->last_assoc_probe_ms = (uint64_t)now;
+    else
+        mosh->last_assoc_probe_ms = 0;
 }
 
 static void mosh_send_ack(Mosh *mosh, unsigned long now)
@@ -286,8 +301,9 @@ static void mosh_send_ack(Mosh *mosh, unsigned long now)
     if (!mosh->udp_ready || mosh->shutdown)
         return;
     if (cmosh_client_make_ack(&mosh->client, mosh_now16(now), packet,
-                              sizeof(packet), &packet_len) == 0)
-        mosh_udp_send(mosh, packet, packet_len);
+                              sizeof(packet), &packet_len) == 0 &&
+        !mosh_udp_send(mosh, packet, packet_len))
+        cmosh_client_note_idle_send_failed(&mosh->client);
 }
 
 static void mosh_timer(void *ctx, unsigned long now)
@@ -580,8 +596,10 @@ static bool mosh_start_udp(Mosh *mosh)
 
     memcpy(mosh->initial_packet, packet, packet_len);
     mosh->initial_packet_len = packet_len;
-    mosh_udp_send(mosh, packet, packet_len);
-    mosh->last_assoc_probe_ms = (uint64_t)GETTICKCOUNT();
+    if (mosh_udp_send(mosh, packet, packet_len))
+        mosh->last_assoc_probe_ms = (uint64_t)GETTICKCOUNT();
+    else
+        mosh->last_assoc_probe_ms = 0;
     schedule_timer(100, mosh_timer, mosh);
 
     if (mosh->ssh_backend) {
@@ -950,9 +968,12 @@ static void mosh_try_send_pending(Mosh *mosh)
                                     packet, sizeof(packet),
                                     &packet_len) != 0)
             return;
-        if (!mosh_udp_send(mosh, packet, packet_len))
+        if (!mosh_udp_send(mosh, packet, packet_len)) {
             cmosh_client_note_input_send_failed(
                 &mosh->client, mosh->client.input.current, now);
+            mosh_consume_pending_input(mosh, chunk);
+            return;
+        }
         mosh_consume_pending_input(mosh, chunk);
     }
 }

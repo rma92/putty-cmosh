@@ -56,6 +56,10 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Native PuTTY Mosh `sendok()` now requires an active UDP socket, so PuTTY applies input backpressure during local UDP outages and wakes the line discipline after a successful reopen.
 * Native PuTTY Mosh now checks the datagram `sk_write()` result. A nonzero return means PuTTY's UDP layer did not send the datagram, including transient buffer-exhaustion cases; retransmitted input is made immediately retryable instead of waiting for the normal retry interval.
 * `cmosh_client_note_idle_send_failed()` rolls back idle/keepalive timing after a failed UDP send, so transient local send failures do not suppress the next keepalive, timeout probe, or retransmit opportunity.
+* Native PuTTY Mosh now logs throttled Event Log diagnostics when `sk_write()` reports a local UDP send failure.
+* Native PuTTY Mosh no longer advances the association-probe retry timestamp when the cached initial UDP packet fails to send locally; the next timer tick can retry instead of waiting a full association interval.
+* Failed ACK datagrams now roll back idle timing so the next timer tick can send another empty ACK/keepalive.
+* PuTTY pending-input draining now stops after the first local UDP send failure. The chunk already accepted by cmosh remains in the retransmission queue, but later bytes stay in `pending_input` so backend backpressure is visible during local buffer exhaustion or interface loss.
 
 ## Protocol Invariants
 
@@ -68,6 +72,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Reopening a local UDP socket must not run recursively inside the socket close notification. Close/detach the failed socket, queue a top-level reopen, and keep retrying without discarding authenticated transport/input state.
 * While the local UDP socket is absent, do not advertise backend send readiness even if the authenticated Mosh session is still logically established.
 * A packet is not considered sent merely because it was encoded. If UDP send reports failure, rollback keepalive timing and, for input-bearing retransmits, make the affected input state immediately retryable.
+* If local UDP sending is failing, do not continue draining the PuTTY-side pending-input buffer into more cmosh states in the same loop; stop after the failed datagram and let normal retry/backpressure resume.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
@@ -119,6 +124,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after UDP datagram send-result handling and idle send-failure rollback.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after UDP datagram send-result handling and idle send-failure rollback.
 * Latest `cmake --build build --target putty --config Debug` passed after UDP datagram send-result handling and idle send-failure rollback.
+* Latest `cmake --build build --target otherbackends --config Debug` passed after PuTTY UDP-send diagnostics, ACK retry rollback, and pending-input drain limiting.
+* Latest `cmake --build build --target putty --config Debug` passed after PuTTY UDP-send diagnostics, ACK retry rollback, and pending-input drain limiting.
 
 ## Known Issues
 
@@ -129,4 +136,4 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 
 ## Exact Next Step
 
-Retest the freshly rebuilt `build\Debug\putty.exe` on a high-latency/lossy connection. Focus sleep/wake, local network loss/recovery, paste bursts, startup UDP establishment, and rapid command-history navigation immediately after login. If repeated characters persist, compare Event Log retransmit lines against the new `Mosh server input ACK ...` lines to see whether repeats occur before the server ACK/throwaway transition or after already-trimmed input state.
+Retest the freshly rebuilt `build\Debug\putty.exe` on a high-latency/lossy connection. Focus sleep/wake, local network loss/recovery, paste bursts, startup UDP establishment, and rapid command-history navigation immediately after login. Watch for the new throttled `Mosh UDP send failed locally...` Event Log line. If repeated characters persist, compare Event Log retransmit lines against the `Mosh server input ACK ...` lines to see whether repeats occur before the server ACK/throwaway transition or after already-trimmed input state.
