@@ -1401,6 +1401,39 @@ static void test_client(void)
               "client stale no-diff transition does not advance state");
     }
 
+    cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 34,
+                      0, 7);
+    check(cmosh_client_make_input(&client, (const unsigned char *)"x", 1,
+                                  100, 0x5546, packet, sizeof(packet),
+                                  &n) == 0 &&
+              cmosh_client_make_input(&client, (const unsigned char *)"y",
+                                      1, 101, 0x5547, packet,
+                                      sizeof(packet), &n) == 0,
+          "client duplicate no-diff ack setup");
+    memset(&ti, 0, sizeof(ti));
+    ti.old_num = 5;
+    ti.new_num = 6;
+    ti.ack_num = 3;
+    ti.throwaway_num = 3;
+    check(cmosh_client_queue_server_diff(&client, &ti, 0x5548) == 0,
+          "client duplicate no-diff queued transition");
+    check(make_test_transport_packet(key, 34, 5, 5, 1, 1, NULL, 0,
+                                     0x5549, packet, sizeof(packet), &n) == 0,
+          "client duplicate no-diff packet source");
+    {
+        struct cmosh_client_recv_event event;
+        check(cmosh_client_process_packet(
+                  &client, packet, n, diff, sizeof(diff), NULL, NULL,
+                  &event) == CMOSH_CLIENT_RECV_DUPLICATE &&
+              event.result == CMOSH_CLIENT_RECV_DUPLICATE &&
+              event.should_ack && event.previous_server_state == 5 &&
+              event.input_acked_before == 1 &&
+              event.input_acked_after == 3 && client.server_state == 6 &&
+              client.input.acked == 3 && client.input.nrecords == 0 &&
+              client.echo_timestamp == 0x5548,
+              "client duplicate drains no-diff queued transition");
+    }
+
     cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 40,
                       0, 7);
     memset(&sink, 0, sizeof(sink));

@@ -340,7 +340,7 @@ enum cmosh_client_recv_result cmosh_client_process_packet(
     }
     if (result == CMOSH_CLIENT_RECV_DUPLICATE) {
         previous_server_state = client ? client->server_state : 0;
-        if (client && output &&
+        if (client &&
             cmosh_client_apply_server_diffs(client, output, ctx) != 0) {
             if (event)
                 event->result = CMOSH_CLIENT_RECV_BAD_PACKET;
