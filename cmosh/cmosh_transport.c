@@ -57,6 +57,20 @@ int cmosh_transport_note_recv(struct cmosh_transport_state *st, uint64_t seq)
     return 0;
 }
 
+static int cmosh_transport_seen_recv(struct cmosh_transport_state *st,
+                                     uint64_t seq)
+{
+    size_t i;
+
+    if (!st)
+        return 0;
+    for (i = 0; i < st->recv_history_count; i++) {
+        if (st->recv_history[i] == seq)
+            return 1;
+    }
+    return 0;
+}
+
 int cmosh_transport_crypto_available(void)
 {
     return 1;
@@ -251,7 +265,7 @@ int cmosh_transport_decode_packet_state(
     if (cmosh_transport_decrypt_packet(key, packet, packet_len, plain,
                                        sizeof(plain), &plain_len, seq) != 0)
         return -1;
-    if (cmosh_transport_note_recv(st, *seq) != 0)
+    if (cmosh_transport_seen_recv(st, *seq))
         return 2;
     if (plain_len < 4)
         return -1;
@@ -264,9 +278,12 @@ int cmosh_transport_decode_packet_state(
 
     if (frag.index == 0 && frag.final) {
         cmosh_transport_clear(st);
-        return cmosh_transport_decode_instruction(frag.payload,
-                                                  frag.payload_len, ti,
-                                                  diff_buf, diff_buf_len);
+        ret = cmosh_transport_decode_instruction(frag.payload,
+                                                 frag.payload_len, ti,
+                                                 diff_buf, diff_buf_len);
+        if (ret == 0)
+            cmosh_transport_note_recv(st, *seq);
+        return ret;
     }
 
     ret = cmosh_transport_reassemble_fragment(st, &frag, assembled,
@@ -274,10 +291,16 @@ int cmosh_transport_decode_packet_state(
                                               &assembled_len);
     if (ret < 0)
         cmosh_transport_clear(st);
-    if (ret != 0)
+    if (ret != 0) {
+        if (ret > 0)
+            cmosh_transport_note_recv(st, *seq);
         return ret;
-    return cmosh_transport_decode_instruction(assembled, assembled_len, ti,
-                                              diff_buf, diff_buf_len);
+    }
+    ret = cmosh_transport_decode_instruction(assembled, assembled_len, ti,
+                                             diff_buf, diff_buf_len);
+    if (ret == 0)
+        cmosh_transport_note_recv(st, *seq);
+    return ret;
 }
 
 void cmosh_transport_nonce_from_seq(uint64_t seq, unsigned char nonce[8])

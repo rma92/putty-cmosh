@@ -99,7 +99,8 @@ struct cmosh_input_record *cmosh_input_retransmit_record(
         return NULL;
     for (i = 0; i < st->nrecords; i++) {
         struct cmosh_input_record *rec = &st->records[i];
-        uint64_t age = now_ms - rec->last_sent_ms;
+        uint64_t age = now_ms >= rec->last_sent_ms ?
+            now_ms - rec->last_sent_ms : 0;
         uint64_t retry_ms = rec->send_count < 2 ?
             CMOSH_INPUT_RETRY_FIRST_MS : CMOSH_INPUT_RETRY_LATER_MS;
 

@@ -60,6 +60,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Native PuTTY Mosh no longer advances the association-probe retry timestamp when the cached initial UDP packet fails to send locally; the next timer tick can retry instead of waiting a full association interval.
 * Failed ACK datagrams now roll back idle timing so the next timer tick can send another empty ACK/keepalive.
 * PuTTY pending-input draining now stops after the first local UDP send failure. The chunk already accepted by cmosh remains in the retransmission queue, but later bytes stay in `pending_input` so backend backpressure is visible during local buffer exhaustion or interface loss.
+* Core retransmit/diagnostic timers now treat backwards time as "not due yet" instead of unsigned-underflowing into immediate retransmit, missing-state, or UDP-timeout events. This covers tick wrap or clock regressions from platform timer sources.
+* Receive replay history is now committed only after a decrypted packet has passed the relevant payload validation. A malformed packet with a fresh sequence no longer poisons the replay window and blocks a later valid packet using that same sequence.
 
 ## Protocol Invariants
 
@@ -73,6 +75,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * While the local UDP socket is absent, do not advertise backend send readiness even if the authenticated Mosh session is still logically established.
 * A packet is not considered sent merely because it was encoded. If UDP send reports failure, rollback keepalive timing and, for input-bearing retransmits, make the affected input state immediately retryable.
 * If local UDP sending is failing, do not continue draining the PuTTY-side pending-input buffer into more cmosh states in the same loop; stop after the failed datagram and let normal retry/backpressure resume.
+* Do not use unsigned elapsed-time subtraction unless the current timestamp is known to be at least the stored timestamp; backwards time is not evidence that retransmit or timeout is due.
+* Do not add a received sequence to replay history until the decrypted packet is structurally valid enough to be consumed. Partial fragments are recorded after a valid fragment is accepted into assembly.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
@@ -126,6 +130,9 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target putty --config Debug` passed after UDP datagram send-result handling and idle send-failure rollback.
 * Latest `cmake --build build --target otherbackends --config Debug` passed after PuTTY UDP-send diagnostics, ACK retry rollback, and pending-input drain limiting.
 * Latest `cmake --build build --target putty --config Debug` passed after PuTTY UDP-send diagnostics, ACK retry rollback, and pending-input drain limiting.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after backwards-time guards and replay-history validation hardening.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after backwards-time guards and replay-history validation hardening.
+* Latest `cmake --build build --target putty --config Debug` passed after backwards-time guards and replay-history validation hardening.
 
 ## Known Issues
 

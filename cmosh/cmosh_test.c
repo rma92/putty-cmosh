@@ -386,6 +386,36 @@ static void test_transport(void)
               ti.diff == diff_copy && ti.diff_len == sizeof(diff) &&
               memcmp(diff_copy, diff, sizeof(diff)) == 0,
           "transport decode instruction packet owns diff");
+    {
+        unsigned char malformed[8];
+
+        cmosh_transport_init(&st);
+        check(cmosh_transport_encrypt_packet(
+                  key, CMOSH_CLIENT_NONCE_BASE | 13,
+                  (const unsigned char *)"", 0, malformed,
+                  sizeof(malformed), &n) != 0,
+              "transport rejects undersized malformed packet buffer");
+        check(cmosh_transport_encrypt_packet(
+                  key, CMOSH_CLIENT_NONCE_BASE | 13,
+                  (const unsigned char *)"", 0, packet,
+                  sizeof(packet), &n) == 0,
+              "transport encrypt malformed packet");
+        check(cmosh_transport_decode_packet_state(
+                  &st, key, packet, n, &ti, diff_copy, sizeof(diff_copy),
+                  &timestamp, &echo_timestamp, &seq) < 0,
+              "transport rejects malformed packet without recording seq");
+        check(cmosh_transport_make_packet(key, 13, 4, 5, 6, diff,
+                                          sizeof(diff), 0x1234, 0x5678,
+                                          packet, sizeof(packet), &n) == 0,
+              "transport make valid packet after malformed same seq");
+        memset(&ti, 0, sizeof(ti));
+        check(cmosh_transport_decode_packet_state(
+                  &st, key, packet, n, &ti, diff_copy, sizeof(diff_copy),
+                  &timestamp, &echo_timestamp, &seq) == 0 &&
+                  ti.old_num == 4 && ti.new_num == 5 &&
+                  ti.ack_num == 6,
+              "transport accepts valid packet after malformed same seq");
+    }
 
     {
         unsigned char instruction[128], compressed[256], fragment[256];
@@ -543,6 +573,8 @@ static void test_session(void)
           "session input ack trims records");
     retry = cmosh_input_retransmit_record(&input, 200);
     check(retry == NULL, "session input no early retransmit");
+    retry = cmosh_input_retransmit_record(&input, 199);
+    check(retry == NULL, "session input no retransmit on backwards time");
     retry = cmosh_input_retransmit_record(&input,
                                           200 + CMOSH_INPUT_RETRY_FIRST_MS);
     check(retry && retry->state == 12, "session input retransmit due");
@@ -858,7 +890,12 @@ static void test_client(void)
     check(!cmosh_client_missing_state_diag_due(
               &client, CMOSH_CLIENT_MISSING_STATE_DIAG_MS + 1, NULL, NULL),
           "client missing state diag throttled");
+    check(!cmosh_client_missing_state_diag_due(
+              &client, CMOSH_CLIENT_MISSING_STATE_DIAG_MS - 1, NULL, NULL),
+          "client missing state diag handles backwards time");
     cmosh_client_note_recv_time(&client, 100);
+    check(!cmosh_client_udp_timeout_due(&client, 99),
+          "client udp timeout handles backwards recv time");
     check(!cmosh_client_udp_timeout_due(
               &client, 100 + CMOSH_CLIENT_UDP_TIMEOUT_DIAG_MS - 1),
           "client udp timeout not early");
@@ -1008,6 +1045,12 @@ static void test_client(void)
                   n == 0 && client.send_seq == send_seq &&
                   !idle_event.retransmitted,
               "client idle keepalive is rate limited");
+        check(cmosh_client_make_idle_event(
+                  &client, 999, 0x7001, packet, sizeof(packet), &n,
+                  &idle_event) == 0 &&
+                  n == 0 && client.send_seq == send_seq &&
+                  !idle_event.retransmitted,
+              "client idle keepalive handles backwards time");
         check(cmosh_client_make_idle_event(
                   &client, 1000 + CMOSH_CLIENT_IDLE_KEEPALIVE_MS,
                   0x7002, packet, sizeof(packet), &n, &idle_event) == 0 &&

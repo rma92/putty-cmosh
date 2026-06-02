@@ -223,7 +223,8 @@ int cmosh_client_make_idle_event(struct cmosh_client *client, uint64_t now_ms,
         retransmit_state = retry->state;
     if (!retry && !missing_state && !udp_timeout &&
         client->last_idle_sent_ms != UINT64_MAX &&
-        now_ms - client->last_idle_sent_ms < CMOSH_CLIENT_IDLE_KEEPALIVE_MS)
+        (now_ms < client->last_idle_sent_ms ||
+         now_ms - client->last_idle_sent_ms < CMOSH_CLIENT_IDLE_KEEPALIVE_MS))
         return 0;
 
     if (cmosh_client_make_idle(client, now_ms, now16, packet, packet_cap,
@@ -451,7 +452,8 @@ int cmosh_client_missing_state_diag_due(struct cmosh_client *client,
 {
     if (!client || !cmosh_client_waiting_for_gap(client, old_num, new_num))
         return 0;
-    if (now_ms - client->last_missing_diag_ms <
+    if (now_ms < client->last_missing_diag_ms ||
+        now_ms - client->last_missing_diag_ms <
         CMOSH_CLIENT_MISSING_STATE_DIAG_MS)
         return 0;
     client->last_missing_diag_ms = now_ms;
@@ -463,7 +465,9 @@ int cmosh_client_udp_timeout_due(struct cmosh_client *client,
 {
     if (!client)
         return 0;
-    if (now_ms - client->last_recv_ms < CMOSH_CLIENT_UDP_TIMEOUT_DIAG_MS ||
+    if (now_ms < client->last_recv_ms ||
+        now_ms - client->last_recv_ms < CMOSH_CLIENT_UDP_TIMEOUT_DIAG_MS ||
+        now_ms < client->last_timeout_diag_ms ||
         now_ms - client->last_timeout_diag_ms <
             CMOSH_CLIENT_UDP_TIMEOUT_DIAG_MS)
         return 0;
