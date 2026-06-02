@@ -57,6 +57,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Native PuTTY Mosh now coalesces resize requests that cannot be packetized immediately because the cmosh input retransmission queue is full or because UDP is not ready. The latest cols/rows stay pending until they can be encoded into a retransmittable input state.
 * Pending PuTTY Mosh resize requests preserve ordering against terminal input already accepted by the backend. The backend records how many pending input bytes must be packetized before the resize, then sends the coalesced resize before later input bytes.
 * Native PuTTY Mosh now keeps the authenticated start ACK pending if the first attempt fails locally, and retries it on timers/reopen/normal ACK paths instead of silently dropping it after the first server packet.
+* Native PuTTY Mosh now caches the exact encrypted start ACK datagram and resends those same bytes for retries. Do not regenerate start ACK retries; the startup ACK uses a fixed transport nonce, so retries must be byte-identical.
 * PuTTY Mosh `sendbuffer()`/`sendok()` now include pending transport-control packets (`pending_start_ack`, `pending_resize`) so PuTTY does not resume local input while ordering-critical control updates are still stuck outside the retransmission queue.
 * Native PuTTY Mosh `sendok()` now requires an active UDP socket, so PuTTY applies input backpressure during local UDP outages and wakes the line discipline after a successful reopen.
 * Native PuTTY Mosh now checks the datagram `sk_write()` result. A nonzero return means PuTTY's UDP layer did not send the datagram, including transient buffer-exhaustion cases; retransmitted input is made immediately retryable instead of waiting for the normal retry interval.
@@ -94,7 +95,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * If local UDP sending is failing, do not continue draining the PuTTY-side pending-input buffer into more cmosh states in the same loop; stop after the failed datagram and let normal retry/backpressure resume.
 * A PuTTY resize event accepted by the backend must either remain in `pending_resize` or be encoded into cmosh retransmission state. Do not silently drop resize updates just because the input retransmission queue is temporarily full.
 * Pending PuTTY resize updates are ordered after input bytes already accepted into the backend and before later pending input bytes. Multiple resize events coalesce to the latest cols/rows at that ordering point.
-* The start ACK generated from the first authenticated server packet is ordering-critical startup state. If local UDP send fails, keep it pending and retry; `sendok()` must remain false while it is pending.
+* The start ACK generated from the first authenticated server packet is ordering-critical startup state. If local UDP send fails, keep it pending and retry the original encrypted datagram; `sendok()` must remain false while it is pending.
 * Do not use unsigned elapsed-time subtraction unless the current timestamp is known to be at least the stored timestamp; backwards time is not evidence that retransmit or timeout is due.
 * Do not add a received sequence to replay history until the decrypted packet is structurally valid enough to be consumed. Partial fragments are recorded after a valid fragment is accepted into assembly.
 * Stateful client receive only accepts server nonce-space packets. Reflected client packets must not affect replay, fragment reassembly, ACK, or terminal state.
@@ -200,6 +201,11 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after pending start-ACK retry and control-packet backpressure hardening.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after pending start-ACK retry and control-packet backpressure hardening.
 * Latest `cmake --build build --target putty --config Debug` passed after pending start-ACK retry and control-packet backpressure hardening.
+* Latest `cmake --build build --target otherbackends --config Debug` passed after byte-identical start ACK retry hardening.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after byte-identical start ACK retry hardening.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after byte-identical start ACK retry hardening.
+* Latest `cmake --build build --target putty --config Debug` passed after byte-identical start ACK retry hardening.
+* Latest `cmake --build build --target cmosh --config Debug` passed after byte-identical start ACK retry hardening.
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after protocol-version, far-future-state, and shutdown-sentinel hardening.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after protocol-version, far-future-state, and shutdown-sentinel hardening.
 * Latest `cmake --build build --target cmosh --config Debug` passed after protocol-version, far-future-state, and shutdown-sentinel hardening.
