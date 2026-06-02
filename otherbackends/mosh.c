@@ -16,6 +16,7 @@
 #include <string.h>
 
 #define MOSH_ASSOC_RETRY_MS 1000U
+#define MOSH_UDP_REOPEN_RETRY_MS 1000U
 
 typedef struct Mosh Mosh;
 
@@ -49,6 +50,7 @@ struct Mosh {
     uint64_t last_recv_diag_ms;
     bool udp_started;
     bool udp_start_queued;
+    bool udp_reopen_queued;
     bool udp_ready;
     bool ssh_disconnected;
     bool remote_exited;
@@ -61,6 +63,7 @@ static void mosh_free(Backend *be);
 static void mosh_timer(void *ctx, unsigned long now);
 static bool mosh_open_udp_socket(Mosh *mosh, bool fatal_on_error);
 static bool mosh_reopen_udp_socket(Mosh *mosh);
+static void mosh_queue_udp_reopen(Mosh *mosh);
 static bool mosh_start_udp(Mosh *mosh);
 static void mosh_start_udp_callback(void *ctx);
 static void mosh_try_send_pending(Mosh *mosh);
@@ -285,9 +288,16 @@ static void mosh_timer(void *ctx, unsigned long now)
 {
     Mosh *mosh = (Mosh *)ctx;
 
+    if (mosh->shutdown || !mosh->udp_started)
+        return;
+    if (!mosh->udp_socket) {
+        mosh_queue_udp_reopen(mosh);
+        return;
+    }
+
     mosh_send_assoc_probe(mosh, now);
     mosh_send_idle(mosh, now);
-    if (mosh->udp_socket && !mosh->shutdown)
+    if (!mosh->shutdown)
         schedule_timer(100, mosh_timer, mosh);
 }
 
@@ -307,25 +317,20 @@ static void mosh_udp_closing(Plug *plug, PlugCloseType type,
 
     if (mosh->shutdown)
         return;
+    if (type == PLUGCLOSE_USER_ABORT)
+        return;
     if (mosh->udp_started && type != PLUGCLOSE_USER_ABORT) {
         char msg[256];
+        Socket *old_socket = mosh->udp_socket;
 
         snprintf(msg, sizeof(msg),
-                 "Mosh UDP socket closed%s%s; attempting local reopen",
+                 "Mosh UDP socket closed%s%s; scheduling local reopen",
                  error_msg ? ": " : "", error_msg ? error_msg : "");
         logevent(mosh->logctx, msg);
-        if (mosh_reopen_udp_socket(mosh))
-            return;
-        if (error_msg)
-            seat_connection_fatal(mosh->seat,
-                                  "Mosh UDP socket closed and reopen failed: "
-                                  "%s",
-                                  error_msg);
-        else
-            seat_connection_fatal(mosh->seat,
-                                  "Mosh UDP socket closed and reopen failed");
-        mosh->shutdown = true;
-        seat_notify_remote_disconnect(mosh->seat);
+        mosh->udp_socket = NULL;
+        if (old_socket)
+            sk_close(old_socket);
+        mosh_queue_udp_reopen(mosh);
         return;
     }
 
@@ -511,11 +516,40 @@ static bool mosh_reopen_udp_socket(Mosh *mosh)
     if (mosh->udp_ready) {
         mosh_send_ack(mosh, GETTICKCOUNT());
         mosh_try_send_pending(mosh);
+        if (mosh->ldisc && mosh_sendok(&mosh->backend))
+            ldisc_check_sendok(mosh->ldisc);
     } else {
         mosh->last_assoc_probe_ms = 0;
         mosh_send_assoc_probe(mosh, GETTICKCOUNT());
     }
     return true;
+}
+
+static void mosh_udp_reopen_callback(void *ctx)
+{
+    Mosh *mosh = (Mosh *)ctx;
+
+    mosh->udp_reopen_queued = false;
+    if (!mosh->udp_started || mosh->shutdown || mosh->udp_socket)
+        return;
+
+    if (!mosh_reopen_udp_socket(mosh)) {
+        logevent(mosh->logctx,
+                 "Mosh UDP socket reopen failed; will retry");
+        schedule_timer(MOSH_UDP_REOPEN_RETRY_MS, mosh_timer, mosh);
+    } else {
+        schedule_timer(100, mosh_timer, mosh);
+    }
+}
+
+static void mosh_queue_udp_reopen(Mosh *mosh)
+{
+    if (!mosh->udp_started || mosh->shutdown || mosh->udp_socket ||
+        mosh->udp_reopen_queued)
+        return;
+
+    mosh->udp_reopen_queued = true;
+    queue_toplevel_callback(mosh_udp_reopen_callback, mosh);
 }
 
 static bool mosh_start_udp(Mosh *mosh)
@@ -999,7 +1033,7 @@ static bool mosh_sendok(Backend *be)
 {
     Mosh *mosh = container_of(be, Mosh, backend);
 
-    return mosh->udp_ready && !mosh->shutdown &&
+    return mosh->udp_ready && mosh->udp_socket && !mosh->shutdown &&
            mosh->pending_input->len == 0 &&
            mosh->client.input.nrecords < CMOSH_INPUT_MAX_RECORDS &&
            mosh->client.input.bytes_len < CMOSH_INPUT_MAX_BYTES;
