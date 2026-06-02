@@ -385,7 +385,7 @@ enum cmosh_client_recv_result cmosh_client_process_packet(
         event->queued_future = queued_future;
         event->previous_server_state = previous_server_state;
         event->server_shutdown =
-            ti.new_num == CMOSH_CLIENT_SERVER_SHUTDOWN_STATE;
+            client->server_state == CMOSH_CLIENT_SERVER_SHUTDOWN_STATE;
         event->should_ack =
             cmosh_client_should_ack(client, &ti, previous_server_state);
         event->input_acked_after = client->input.acked;
@@ -426,6 +426,10 @@ int cmosh_client_note_server_instruction(
     if (ti->new_num <= client->server_state)
         return 0;
     if (ti->old_num < client->server_state)
+        return 0;
+    if (ti->old_num > client->server_state &&
+        ti->old_num - client->server_state >
+        CMOSH_CLIENT_SERVER_FUTURE_WINDOW)
         return 0;
     if (ti->old_num > client->server_state && queued_future)
         *queued_future = 1;

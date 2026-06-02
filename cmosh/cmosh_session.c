@@ -259,7 +259,7 @@ struct cmosh_server_diff *cmosh_server_queue_pop_next(
         if (!entry->used || entry->new_num <= server_state ||
             entry->old_num != server_state)
             continue;
-        if (entry->new_num < best_new) {
+        if (best == CMOSH_SERVER_QUEUE || entry->new_num < best_new) {
             best = i;
             best_new = entry->new_num;
         }

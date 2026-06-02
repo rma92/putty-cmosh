@@ -397,6 +397,44 @@ static void test_transport(void)
               memcmp(diff_copy, diff, sizeof(diff)) == 0,
           "transport decode instruction packet owns diff");
     {
+        unsigned char instruction[128], compressed[192], fragment[224];
+        unsigned char plain2[256], packet2[320];
+        struct cmosh_transport_instruction badver;
+        size_t instruction_len, compressed_len, fragment_len, plain_len;
+
+        memset(&badver, 0, sizeof(badver));
+        badver.protocol_version = CMOSH_PROTOCOL_VERSION + 1;
+        badver.old_num = 3;
+        badver.new_num = 4;
+        badver.ack_num = 5;
+        badver.diff = diff;
+        badver.diff_len = sizeof(diff);
+        check(cmosh_encode_transport_instruction(
+                  &badver, instruction, sizeof(instruction),
+                  &instruction_len) == 0 &&
+              cmosh_zlib_store_compress(instruction, instruction_len,
+                                        compressed, sizeof(compressed),
+                                        &compressed_len) == 0 &&
+              cmosh_encode_fragment(17, 0, 1, compressed, compressed_len,
+                                    fragment, sizeof(fragment),
+                                    &fragment_len) == 0,
+              "transport make bad-version instruction");
+        plain2[0] = 0x12;
+        plain2[1] = 0x34;
+        plain2[2] = 0x56;
+        plain2[3] = 0x78;
+        memcpy(plain2 + 4, fragment, fragment_len);
+        plain_len = fragment_len + 4;
+        check(cmosh_transport_encrypt_packet(
+                  key, CMOSH_CLIENT_NONCE_BASE | 17, plain2, plain_len,
+                  packet2, sizeof(packet2), &n) == 0,
+              "transport encrypt bad-version instruction");
+        check(cmosh_transport_decode_packet(key, packet2, n, &ti, diff_copy,
+                                            sizeof(diff_copy), &timestamp,
+                                            &echo_timestamp, &seq) != 0,
+              "transport rejects bad protocol version");
+    }
+    {
         unsigned char malformed[8];
 
         cmosh_transport_init(&st);
@@ -738,6 +776,14 @@ static void test_session(void)
     check(cmosh_server_queue_add(&queue, 4, 5,
                                  (const unsigned char *)"x", 1) != 0,
           "session queue rejects conflicting duplicate diff");
+    check(cmosh_server_queue_add(&queue, 3, UINT64_MAX,
+                                 (const unsigned char *)"s", 1) == 0,
+          "session queue add shutdown sentinel");
+    entry = cmosh_server_queue_pop_next(&queue, 3);
+    check(entry && entry->old_num == 3 && entry->new_num == UINT64_MAX &&
+              entry->diff[0] == 's',
+          "session queue pops shutdown sentinel");
+    entry->used = 0;
     check(cmosh_server_queue_waiting_for_gap(&queue, 3, &gap_old,
                                              &gap_new) &&
               gap_old == 4 && gap_new == 5,
@@ -1061,6 +1107,34 @@ static void test_client(void)
               previous_state == 21 && queued_future &&
               cmosh_client_waiting_for_gap(&client, NULL, NULL),
           "client queues future gap");
+    cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 10,
+                      0, 6);
+    memset(&ti, 0, sizeof(ti));
+    ti.old_num = 5 + CMOSH_CLIENT_SERVER_FUTURE_WINDOW + 1;
+    ti.new_num = ti.old_num + 1;
+    ti.diff = (const unsigned char *)"f";
+    ti.diff_len = 1;
+    queued_future = 0;
+    check(cmosh_client_note_server_instruction(&client, &ti, 0,
+                                               &queued_future,
+                                               &previous_state) == 0 &&
+              previous_state == 5 && !queued_future &&
+              !cmosh_client_waiting_for_gap(&client, NULL, NULL),
+          "client ignores too-far future gap");
+    cmosh_client_init(&client, key, 1, 21, CMOSH_SERVER_NONCE_BASE | 10,
+                      0, 6);
+    memset(&ti, 0, sizeof(ti));
+    ti.old_num = 30;
+    ti.new_num = 31;
+    ti.diff = (const unsigned char *)"z";
+    ti.diff_len = 1;
+    queued_future = 0;
+    check(cmosh_client_note_server_instruction(&client, &ti, 0,
+                                               &queued_future,
+                                               &previous_state) == 0 &&
+              previous_state == 21 && queued_future &&
+              cmosh_client_waiting_for_gap(&client, NULL, NULL),
+          "client still queues near future gap");
     check(cmosh_client_missing_state_diag_due(
               &client, CMOSH_CLIENT_MISSING_STATE_DIAG_MS, NULL, NULL),
           "client missing state diag due");
@@ -1165,6 +1239,49 @@ static void test_client(void)
               !cmosh_client_waiting_for_gap(&client, NULL, NULL) &&
               client.input.acked == 3 && client.input.nrecords == 0,
               "client overlapping stale diff ignored but acked");
+    }
+
+    cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 10,
+                      0, 6);
+    memset(&sink, 0, sizeof(sink));
+    check(make_test_transport_packet(key, 14, 4,
+                                     CMOSH_CLIENT_SERVER_SHUTDOWN_STATE,
+                                     1, 1, (const unsigned char *)"s", 1,
+                                     0x5133, packet, sizeof(packet), &n) ==
+              0,
+          "client stale shutdown packet source");
+    {
+        struct cmosh_client_recv_event event;
+        check(cmosh_client_process_packet(
+                  &client, packet, n, diff, sizeof(diff),
+                  test_output_callback, &sink, &event) ==
+                  CMOSH_CLIENT_RECV_OK &&
+              event.old_num == 4 &&
+              event.new_num == CMOSH_CLIENT_SERVER_SHUTDOWN_STATE &&
+              !event.server_shutdown && !event.should_ack &&
+              client.server_state == 5 && sink.len == 0,
+              "client stale shutdown transition ignored");
+    }
+
+    cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 20,
+                      0, 6);
+    memset(&sink, 0, sizeof(sink));
+    check(make_test_transport_packet(key, 21, 5,
+                                     CMOSH_CLIENT_SERVER_SHUTDOWN_STATE,
+                                     1, 1, (const unsigned char *)"s", 1,
+                                     0x5134, packet, sizeof(packet), &n) ==
+              0,
+          "client applicable shutdown packet source");
+    {
+        struct cmosh_client_recv_event event;
+        check(cmosh_client_process_packet(
+                  &client, packet, n, diff, sizeof(diff),
+                  test_output_callback, &sink, &event) ==
+                  CMOSH_CLIENT_RECV_OK &&
+              event.server_shutdown && event.should_ack &&
+              client.server_state == CMOSH_CLIENT_SERVER_SHUTDOWN_STATE &&
+              sink.len == 1 && sink.bytes[0] == 's',
+              "client applicable shutdown transition reports shutdown");
     }
 
     cmosh_client_init(&client, key, 1, 5, CMOSH_SERVER_NONCE_BASE | 10,

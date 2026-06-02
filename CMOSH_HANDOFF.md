@@ -74,6 +74,9 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Server diff queueing now rejects non-advancing state ranges and conflicting duplicate transitions for the same `old_num`/`new_num`; identical retransmitted transitions remain accepted.
 * `cmosh_client_recv_packet()` now only decodes/authenticates transport packets; `cmosh_client_process_packet()` commits echo timestamps plus input ACK/throwaway trimming only after the server instruction is accepted and any applicable diff output succeeds.
 * Overlapping stale server diffs (`old_num < current server_state < new_num`) are ignored at the client state-machine level instead of being queued as future gaps; authenticated ACK/throwaway fields in those packets can still trim input after processing succeeds.
+* Transport decode now rejects authenticated packets whose decoded `protocol_version` does not match `CMOSH_PROTOCOL_VERSION`.
+* Client receive now ignores server-state transitions whose `old_num` is beyond `CMOSH_CLIENT_SERVER_FUTURE_WINDOW` from the current state, preventing far-future packets from churning the bounded recovery queue.
+* Server shutdown reporting now comes from the committed client server state, not directly from an ignored/stale packet's `new_num`. The queue selector also handles the shutdown sentinel `UINT64_MAX` as an applicable next state.
 
 ## Protocol Invariants
 
@@ -102,6 +105,9 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * A complete single-fragment older packet may decode independently while a newer fragmented instruction is pending, but must not clear the newer partial assembly.
 * Queued server diffs now retain authenticated ACK/throwaway metadata and the packet timestamp. If host output fails once and a later duplicate drains the retained diff, input trimming and echo timestamp update complete with that retained metadata instead of leaving retransmission state stale.
 * When the bounded server-diff queue is full, preserve the closest recoverable state transitions. A nearer incoming diff may evict the farthest future diff, while a too-far future diff is dropped instead of displacing closer recovery state.
+* Far-future server transitions outside `CMOSH_CLIENT_SERVER_FUTURE_WINDOW` must not enter the future-diff queue. They may still carry authenticated input ACK/throwaway information after high-level validation.
+* Remote shutdown is a committed server-state transition. Stale or ignored packets with `new_num == UINT64_MAX` must not notify remote exit unless the state machine actually advances to `CMOSH_CLIENT_SERVER_SHUTDOWN_STATE`.
+* Decoded transport instructions must match `CMOSH_PROTOCOL_VERSION` before client state, ACK trimming, or host output can be affected.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
 * Keep server sequence replay, out-of-order fragments, missing state gaps, and input retransmission state separate.
@@ -190,6 +196,10 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after pending start-ACK retry and control-packet backpressure hardening.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after pending start-ACK retry and control-packet backpressure hardening.
 * Latest `cmake --build build --target putty --config Debug` passed after pending start-ACK retry and control-packet backpressure hardening.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after protocol-version, far-future-state, and shutdown-sentinel hardening.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after protocol-version, far-future-state, and shutdown-sentinel hardening.
+* Latest `cmake --build build --target cmosh --config Debug` passed after protocol-version, far-future-state, and shutdown-sentinel hardening.
+* Latest `cmake --build build --target putty --config Debug` passed after protocol-version, far-future-state, and shutdown-sentinel hardening.
 
 ## Known Issues
 

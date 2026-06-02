@@ -148,6 +148,8 @@ static int cmosh_transport_decode_instruction(
     if (cmosh_decode_transport_instruction(decompressed, decompressed_len,
                                            ti, NULL, NULL) != 0)
         return -1;
+    if (ti->protocol_version != CMOSH_PROTOCOL_VERSION)
+        return -1;
     if (ti->diff_len) {
         if (!diff_buf || ti->diff_len > diff_buf_len)
             return -1;
