@@ -12,6 +12,8 @@ Latest checkpoint: extended `cmosh_terminal` compatibility handling with HT/tab 
 
 Latest checkpoint: added more terminal compatibility for full-screen/curses apps. `cmosh_terminal` now tracks G0 ACS designation and maps common VT100 line-drawing bytes (`lqqk`, etc.) to UTF-8 box drawing, supports `CSI b` repeat-last-character, `CSI I`/`CSI Z` tab forward/backward, and non-private `CSI 4 h/l` insert mode. Focused tests cover ACS mapping/reset, ACS repeat, insert-mode printable shifts, and CSI tab movement.
 
+Latest checkpoint: fixed full-redraw rendering of colored blank cells, reported from `dialog` default blue background. The renderer now treats blank cells with non-default attributes as visible row content and emits spaces for them, while still using `ESC[K` only for truly default trailing cells. Added a regression test for a blue full-screen clear with message-box text.
+
 ## Files Recently Touched
 
 * `cmosh/cmosh_client.c`
@@ -318,6 +320,11 @@ Latest checkpoint: added more terminal compatibility for full-screen/curses apps
 * Latest `cmake --build build --target cmosh --config Debug` passed after ACS/insert-mode/CSI-tab renderer compatibility.
 * Latest `cmake --build build --target putty --config Debug` passed after ACS/insert-mode/CSI-tab renderer compatibility.
 * Latest `git diff --check` passed with only expected CRLF conversion warnings.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after colored blank-cell full-redraw fix.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after colored blank-cell full-redraw fix.
+* Latest `cmake --build build --target cmosh --config Debug` passed after colored blank-cell full-redraw fix.
+* Latest `cmake --build build --target putty --config Debug` passed after colored blank-cell full-redraw fix.
+* Latest `git diff --check` passed with only expected CRLF conversion warnings.
 
 ## Known Issues
 
@@ -329,4 +336,4 @@ Latest checkpoint: added more terminal compatibility for full-screen/curses apps
 
 ## Exact Next Step
 
-Retest `build\Debug\putty.exe` with bash prompt/history immediately after login, colored `ls`, vim, less/man, Lynx/emoji pages, ACS/line-drawing TUIs (`htop`, `mc`, `dialog`, tmux panes/status lines), maximize/restore, startup history navigation, sleep/wake, local network loss/recovery, paste bursts, and large/fragmented screen updates. If redraw behavior is stable, next renderer work should be driven by observed parser gaps; otherwise the next planned internal improvement is closer width parity with PuTTY's Unicode tables and eventual dirty-region rendering.
+Retest `build\Debug\putty.exe` with `dialog` default blue background/message boxes, bash prompt/history immediately after login, colored `ls`, vim, less/man, Lynx/emoji pages, ACS/line-drawing TUIs (`htop`, `mc`, tmux panes/status lines), maximize/restore, startup history navigation, sleep/wake, local network loss/recovery, paste bursts, and large/fragmented screen updates. If redraw behavior is stable, next renderer work should be driven by observed parser gaps; otherwise the next planned internal improvement is closer width parity with PuTTY's Unicode tables and eventual dirty-region rendering.

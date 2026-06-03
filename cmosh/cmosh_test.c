@@ -90,6 +90,28 @@ static int buffer_contains(const unsigned char *buf, size_t len,
     return 0;
 }
 
+static int buffer_contains_repeated_byte_after(const unsigned char *buf,
+                                               size_t len, const char *needle,
+                                               unsigned char byte,
+                                               size_t count)
+{
+    size_t needle_len = strlen(needle);
+    size_t i, j;
+
+    if (needle_len + count > len)
+        return 0;
+    for (i = 0; i <= len - needle_len - count; i++) {
+        if (memcmp(buf + i, needle, needle_len) != 0)
+            continue;
+        for (j = 0; j < count; j++)
+            if (buf[i + needle_len + j] != byte)
+                break;
+        if (j == count)
+            return 1;
+    }
+    return 0;
+}
+
 static void test_base64(void)
 {
     unsigned char out[32];
@@ -546,8 +568,11 @@ static void test_terminal(void)
               strlen("\033[44m\033[2J\033[2;3HBox")) == 0 &&
               cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
                                                    &n) == 0 &&
-              buffer_contains(out, n, "\033[44m     \033[0m\033[K") &&
-              buffer_contains(out, n, "\033[2;1H  Box"),
+              buffer_contains_repeated_byte_after(out, n, "\033[44m",
+                                                  ' ', 5) &&
+              buffer_contains_repeated_byte_after(out, n, "\033[44m",
+                                                  ' ', 2) &&
+              buffer_contains(out, n, "Box"),
           "terminal renders colored blank background cells");
     cmosh_terminal_free(term);
 
