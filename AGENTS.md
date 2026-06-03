@@ -52,6 +52,8 @@ rg -n "pattern" path\to\likely-file.c -m 40
 
 Avoid broad recursive PowerShell searches unless output is capped.
 
+Prefer short, direct PowerShell commands when they achieve the same result, to reduce token and output volume.
+
 If using PowerShell `Select-String`, limit the output:
 
 ```powershell
