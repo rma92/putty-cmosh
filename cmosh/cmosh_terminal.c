@@ -58,6 +58,8 @@ struct cmosh_terminal {
     int wrap_mode;
     int origin_mode;
     int insert_mode;
+    int app_cursor_keys;
+    int app_keypad_keys;
     int pending_wrap;
     int reverse_video;
     int using_alternate;
@@ -864,9 +866,11 @@ static void cmosh_apply_csi(struct cmosh_terminal *term, char final)
             int set = final == 'h';
             unsigned int i;
             for (i = 0; i < nparams; i++) {
-                if (!priv && params[i] == 4) {
+                if (!priv && params[i] == 4)
                     term->insert_mode = set;
-                } else if (priv && params[i] == 25)
+                else if (priv && params[i] == 1)
+                    term->app_cursor_keys = set;
+                else if (priv && params[i] == 25)
                     term->cursor_visible = set;
                 else if (priv && params[i] == 5)
                     term->reverse_video = set;
@@ -1053,7 +1057,11 @@ static void cmosh_terminal_byte(struct cmosh_terminal *term, unsigned char ch)
                    ch == '-' || ch == '.' || ch == '/') {
             term->charset_select = ch;
             term->state = CMOSH_PARSE_CHARSET;
-        } else if (ch == '=' || ch == '>') {
+        } else if (ch == '=') {
+            term->app_keypad_keys = 1;
+            term->state = CMOSH_PARSE_NORMAL;
+        } else if (ch == '>') {
+            term->app_keypad_keys = 0;
             term->state = CMOSH_PARSE_NORMAL;
         } else {
             term->state = CMOSH_PARSE_NORMAL;
@@ -1175,7 +1183,14 @@ int cmosh_terminal_render_full(struct cmosh_terminal *term,
 
     if (!term || !output)
         return -1;
-    if (cmosh_out(output, ctx, "\033[?25l\033[0m\033[H\033[2J") != 0)
+    if (cmosh_out(output, ctx, "\033[?25l\033[?1l\033>\033[0m"
+                            "\033[H\033[2J") != 0)
+        return -1;
+    if (term->app_cursor_keys &&
+        cmosh_out(output, ctx, "\033[?1h") != 0)
+        return -1;
+    if (term->app_keypad_keys &&
+        cmosh_out(output, ctx, "\033=") != 0)
         return -1;
     for (r = 0; r < term->rows; r++) {
         unsigned int last = 0;

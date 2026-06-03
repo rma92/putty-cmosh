@@ -14,6 +14,8 @@ Latest checkpoint: added more terminal compatibility for full-screen/curses apps
 
 Latest checkpoint: fixed full-redraw rendering of colored blank cells, reported from `dialog` default blue background. The renderer now treats blank cells with non-default attributes as visible row content and emits spaces for them, while still using `ESC[K` only for truly default trailing cells. Added a regression test for a blue full-screen clear with message-box text.
 
+Latest checkpoint: user confirmed `dialog` works. Added cmosh terminal state for DECCKM application cursor keys (`CSI ? 1 h/l`) and DECKPAM/DECKPNM application keypad mode (`ESC =`/`ESC >`). Full redraw now resets PuTTY's terminal keyboard modes to normal and then restores the cmosh model's active modes, so full-screen apps such as `mc` can switch arrow-key encoding even though raw host output is no longer forwarded. Focused tests cover cursor/keypad mode restoration.
+
 ## Files Recently Touched
 
 * `cmosh/cmosh_client.c`

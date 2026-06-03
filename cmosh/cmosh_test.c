@@ -689,6 +689,38 @@ static void test_terminal(void)
           "terminal CSI tab forward and backward");
     cmosh_terminal_free(term);
 
+    term = cmosh_terminal_new(5, 1);
+    check(cmosh_terminal_apply_bytes(term, (const unsigned char *)"\033[?1h",
+                                     5) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "\033[?1h"),
+          "terminal render restores application cursor mode");
+    check(cmosh_terminal_apply_bytes(term, (const unsigned char *)"\033[?1l",
+                                     5) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              !buffer_contains(out, n, "\033[?1h") &&
+              buffer_contains(out, n, "\033[?1l"),
+          "terminal render restores normal cursor mode");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(5, 1);
+    check(cmosh_terminal_apply_bytes(term, (const unsigned char *)"\033=",
+                                     2) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "\033="),
+          "terminal render restores application keypad mode");
+    check(cmosh_terminal_apply_bytes(term, (const unsigned char *)"\033>",
+                                     2) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              !buffer_contains(out, n, "\033=") &&
+              buffer_contains(out, n, "\033>"),
+          "terminal render restores normal keypad mode");
+    cmosh_terminal_free(term);
+
     term = cmosh_terminal_new(5, 3);
     check(cmosh_terminal_apply_bytes(
               term, (const unsigned char *)"one\ntwo\nthree\nfour", 18) ==
