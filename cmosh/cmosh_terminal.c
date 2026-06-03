@@ -57,9 +57,12 @@ struct cmosh_terminal {
     int cursor_visible;
     int wrap_mode;
     int origin_mode;
+    int insert_mode;
     int pending_wrap;
     int reverse_video;
     int using_alternate;
+    int g0_acs;
+    unsigned char charset_select;
     struct cmosh_attr attr;
     enum cmosh_parse_state state;
     char csi[128];
@@ -69,6 +72,9 @@ struct cmosh_terminal {
     unsigned int utf8_remaining;
     unsigned char utf8_buf[8];
     unsigned int utf8_len;
+    char last_text[CMOSH_CELL_TEXT_MAX];
+    unsigned char last_len;
+    unsigned char last_width;
 };
 
 static struct cmosh_color cmosh_default_color(void)
@@ -193,6 +199,22 @@ static void cmosh_horizontal_tab(struct cmosh_terminal *term)
     }
     if (term->cols)
         term->cursor_col = term->cols - 1;
+}
+
+static void cmosh_back_tab(struct cmosh_terminal *term)
+{
+    unsigned int col;
+
+    term->pending_wrap = 0;
+    if (!term->cursor_col)
+        return;
+    for (col = term->cursor_col; col-- > 0;) {
+        if (cmosh_tab_is_set(term, col)) {
+            term->cursor_col = col;
+            return;
+        }
+    }
+    term->cursor_col = 0;
 }
 
 struct cmosh_terminal *cmosh_terminal_new(unsigned int cols,
@@ -482,6 +504,8 @@ static void cmosh_put_codepoint(struct cmosh_terminal *term,
             width = 1;
         }
     }
+    if (term->insert_mode)
+        cmosh_insert_blank_chars(term, (unsigned int)width);
 
     cell = cmosh_cell_at(term, term->cursor_row, term->cursor_col);
     cmosh_clear_cell(cell, &term->attr);
@@ -493,6 +517,11 @@ static void cmosh_put_codepoint(struct cmosh_terminal *term,
     cell->width = (unsigned char)width;
     cell->attr = term->attr;
     cell->dirty = 1;
+    if (utf8 != (const unsigned char *)term->last_text)
+        memcpy(term->last_text, utf8, len);
+    term->last_text[len] = '\0';
+    term->last_len = (unsigned char)len;
+    term->last_width = (unsigned char)width;
     if (width > 1 && term->cursor_col + 1 < term->cols) {
         cell = cmosh_cell_at(term, term->cursor_row, term->cursor_col + 1);
         cmosh_clear_cell(cell, &term->attr);
@@ -712,6 +741,16 @@ static void cmosh_apply_csi(struct cmosh_terminal *term, char final)
         cmosh_move_cursor(term, (int)term->cursor_row,
                           cmosh_param(params, nparams, 0, 1) - 1);
         break;
+      case 'I':
+        n = cmosh_param(params, nparams, 0, 1);
+        while (n-- > 0)
+            cmosh_horizontal_tab(term);
+        break;
+      case 'Z':
+        n = cmosh_param(params, nparams, 0, 1);
+        while (n-- > 0)
+            cmosh_back_tab(term);
+        break;
       case 'd':
         n = cmosh_param(params, nparams, 0, 1) - 1;
         if (term->origin_mode) {
@@ -720,6 +759,12 @@ static void cmosh_apply_csi(struct cmosh_terminal *term, char final)
                 n = (int)term->scroll_bottom;
         }
         cmosh_move_cursor(term, n, (int)term->cursor_col);
+        break;
+      case 'b':
+        n = cmosh_param(params, nparams, 0, 1);
+        while (n-- > 0 && term->last_len)
+            cmosh_put_codepoint(term, (const unsigned char *)term->last_text,
+                                term->last_len, term->last_width);
         break;
       case 'J':
         n = cmosh_param(params, nparams, 0, 0);
@@ -815,24 +860,25 @@ static void cmosh_apply_csi(struct cmosh_terminal *term, char final)
         break;
       case 'h':
       case 'l':
-        if (priv) {
+        {
             int set = final == 'h';
             unsigned int i;
             for (i = 0; i < nparams; i++) {
-                if (params[i] == 25)
+                if (!priv && params[i] == 4) {
+                    term->insert_mode = set;
+                } else if (priv && params[i] == 25)
                     term->cursor_visible = set;
-                else if (params[i] == 5)
+                else if (priv && params[i] == 5)
                     term->reverse_video = set;
-                else if (params[i] == 6) {
+                else if (priv && params[i] == 6) {
                     term->origin_mode = set;
                     cmosh_move_cursor(term, set ? (int)term->scroll_top : 0,
                                       0);
-                }
-                else if (params[i] == 7)
+                } else if (priv && params[i] == 7)
                     term->wrap_mode = set;
-                else if (params[i] == 1047)
+                else if (priv && params[i] == 1047)
                     cmosh_use_alternate_screen(term, set, set, 0);
-                else if (params[i] == 1048) {
+                else if (priv && params[i] == 1048) {
                     if (set) {
                         term->saved_cursor_row = term->cursor_row;
                         term->saved_cursor_col = term->cursor_col;
@@ -840,7 +886,7 @@ static void cmosh_apply_csi(struct cmosh_terminal *term, char final)
                         cmosh_move_cursor(term, term->saved_cursor_row,
                                           term->saved_cursor_col);
                     }
-                } else if (params[i] == 1049)
+                } else if (priv && params[i] == 1049)
                     cmosh_use_alternate_screen(term, set, set, 1);
             }
         }
@@ -857,6 +903,38 @@ static void cmosh_process_codepoint(struct cmosh_terminal *term,
 {
     int width = cmosh_codepoint_width(cp);
     cmosh_put_codepoint(term, utf8, len, width);
+}
+
+static int cmosh_acs_utf8(unsigned char ch, const unsigned char **utf8,
+                          unsigned int *len)
+{
+    switch (ch) {
+      case '`': *utf8 = (const unsigned char *)"\xe2\x97\x86"; break;
+      case 'a': *utf8 = (const unsigned char *)"\xe2\x96\x92"; break;
+      case 'f': *utf8 = (const unsigned char *)"\xc2\xb0"; *len = 2; return 1;
+      case 'g': *utf8 = (const unsigned char *)"\xc2\xb1"; *len = 2; return 1;
+      case 'j': *utf8 = (const unsigned char *)"\xe2\x94\x98"; break;
+      case 'k': *utf8 = (const unsigned char *)"\xe2\x94\x90"; break;
+      case 'l': *utf8 = (const unsigned char *)"\xe2\x94\x8c"; break;
+      case 'm': *utf8 = (const unsigned char *)"\xe2\x94\x94"; break;
+      case 'n': *utf8 = (const unsigned char *)"\xe2\x94\xbc"; break;
+      case 'q': *utf8 = (const unsigned char *)"\xe2\x94\x80"; break;
+      case 't': *utf8 = (const unsigned char *)"\xe2\x94\x9c"; break;
+      case 'u': *utf8 = (const unsigned char *)"\xe2\x94\xa4"; break;
+      case 'v': *utf8 = (const unsigned char *)"\xe2\x94\xb4"; break;
+      case 'w': *utf8 = (const unsigned char *)"\xe2\x94\xac"; break;
+      case 'x': *utf8 = (const unsigned char *)"\xe2\x94\x82"; break;
+      case 'y': *utf8 = (const unsigned char *)"\xe2\x89\xa4"; break;
+      case 'z': *utf8 = (const unsigned char *)"\xe2\x89\xa5"; break;
+      case '{': *utf8 = (const unsigned char *)"\xcf\x80"; *len = 2; return 1;
+      case '|': *utf8 = (const unsigned char *)"\xe2\x89\xa0"; break;
+      case '}': *utf8 = (const unsigned char *)"\xc2\xa3"; *len = 2; return 1;
+      case '~': *utf8 = (const unsigned char *)"\xc2\xb7"; *len = 2; return 1;
+      default:
+        return 0;
+    }
+    *len = 3;
+    return 1;
 }
 
 static void cmosh_terminal_normal_byte(struct cmosh_terminal *term,
@@ -879,8 +957,13 @@ static void cmosh_terminal_normal_byte(struct cmosh_terminal *term,
     }
 
     if (ch < 0x80) {
+        const unsigned char *acs;
+        unsigned int acs_len;
         unsigned char b = ch;
-        cmosh_process_codepoint(term, ch, &b, 1);
+        if (term->g0_acs && cmosh_acs_utf8(ch, &acs, &acs_len))
+            cmosh_put_codepoint(term, acs, acs_len, 1);
+        else
+            cmosh_process_codepoint(term, ch, &b, 1);
     } else if ((ch & 0xe0) == 0xc0) {
         term->utf8_codepoint = ch & 0x1f;
         term->utf8_remaining = 1;
@@ -915,6 +998,9 @@ static void cmosh_terminal_byte(struct cmosh_terminal *term, unsigned char ch)
             break;
           case '\t':
             cmosh_horizontal_tab(term);
+            break;
+          case 0x0e:
+          case 0x0f:
             break;
           case '\r':
             term->cursor_col = 0;
@@ -965,6 +1051,7 @@ static void cmosh_terminal_byte(struct cmosh_terminal *term, unsigned char ch)
             term->state = CMOSH_PARSE_NORMAL;
         } else if (ch == '(' || ch == ')' || ch == '*' || ch == '+' ||
                    ch == '-' || ch == '.' || ch == '/') {
+            term->charset_select = ch;
             term->state = CMOSH_PARSE_CHARSET;
         } else if (ch == '=' || ch == '>') {
             term->state = CMOSH_PARSE_NORMAL;
@@ -973,6 +1060,9 @@ static void cmosh_terminal_byte(struct cmosh_terminal *term, unsigned char ch)
         }
         break;
       case CMOSH_PARSE_CHARSET:
+        if (term->charset_select == '(')
+            term->g0_acs = (ch == '0');
+        term->charset_select = 0;
         term->state = CMOSH_PARSE_NORMAL;
         break;
       case CMOSH_PARSE_CSI:
@@ -1091,7 +1181,8 @@ int cmosh_terminal_render_full(struct cmosh_terminal *term,
         unsigned int last = 0;
         for (c = 0; c < term->cols; c++) {
             struct cmosh_cell *cell = cmosh_cell_at(term, r, c);
-            if (cell->width && cell->len)
+            if (cell->width &&
+                (cell->len || !cmosh_attr_equal(&cell->attr, &default_attr)))
                 last = c + cell->width;
         }
         if (r || cmosh_out(output, ctx, "\033[H") != 0) {

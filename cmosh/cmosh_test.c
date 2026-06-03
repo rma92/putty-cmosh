@@ -540,6 +540,17 @@ static void test_terminal(void)
           "terminal resets attributes before clearing row tail");
     cmosh_terminal_free(term);
 
+    term = cmosh_terminal_new(5, 2);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"\033[44m\033[2J\033[2;3HBox",
+              strlen("\033[44m\033[2J\033[2;3HBox")) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "\033[44m     \033[0m\033[K") &&
+              buffer_contains(out, n, "\033[2;1H  Box"),
+          "terminal renders colored blank background cells");
+    cmosh_terminal_free(term);
+
     term = cmosh_terminal_new(10, 3);
     check(cmosh_terminal_apply_bytes(
               term, (const unsigned char *)"abcde\r\033[2P", 10) == 0 &&
@@ -608,13 +619,49 @@ static void test_terminal(void)
 
     term = cmosh_terminal_new(10, 1);
     check(cmosh_terminal_apply_bytes(
-              term, (const unsigned char *)"\033(0lqqk",
-              strlen("\033(0lqqk")) == 0 &&
+              term, (const unsigned char *)"\033(0lqqk\033(Bx",
+              strlen("\033(0lqqk\033(Bx")) == 0 &&
               cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
                                                    &n) == 0 &&
-              buffer_contains(out, n, "lqqk") &&
+              buffer_contains(out, n,
+                              "\xe2\x94\x8c\xe2\x94\x80\xe2\x94\x80"
+                              "\xe2\x94\x90x") &&
+              !buffer_contains(out, n, "lqqk") &&
               !buffer_contains(out, n, "0lqqk"),
-          "terminal consumes charset designation");
+          "terminal maps ACS charset designation");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(10, 1);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"\033(0q\033[4b\033(Bx",
+              strlen("\033(0q\033[4b\033(Bx")) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n,
+                              "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+                              "\xe2\x94\x80\xe2\x94\x80x"),
+          "terminal repeats ACS character");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(5, 1);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"abcd\r\033[4hX\033[4lY",
+              strlen("abcd\r\033[4hX\033[4lY")) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "XYbcd"),
+          "terminal insert mode shifts printable cells");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(10, 1);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"a\033[4G\033H\r\033[Ib"
+                                            "\033[9G\033[Zc",
+              strlen("a\033[4G\033H\r\033[Ib\033[9G\033[Zc")) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "a  c"),
+          "terminal CSI tab forward and backward");
     cmosh_terminal_free(term);
 
     term = cmosh_terminal_new(5, 3);

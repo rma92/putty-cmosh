@@ -10,6 +10,8 @@ Latest user feedback: maximize/restore works, emojis are working, and the previo
 
 Latest checkpoint: extended `cmosh_terminal` compatibility handling with HT/tab stops (`ESC H`, CSI `g`), DECOM origin mode `?6`, CSI `s`/`u` save/restore cursor, keypad mode no-ops, and charset-designation consumption (`ESC ( 0` etc.) so designation bytes are not rendered as text. Also tightened the insert-line reverse loop. Focused tests were added for these sequences.
 
+Latest checkpoint: added more terminal compatibility for full-screen/curses apps. `cmosh_terminal` now tracks G0 ACS designation and maps common VT100 line-drawing bytes (`lqqk`, etc.) to UTF-8 box drawing, supports `CSI b` repeat-last-character, `CSI I`/`CSI Z` tab forward/backward, and non-private `CSI 4 h/l` insert mode. Focused tests cover ACS mapping/reset, ACS repeat, insert-mode printable shifts, and CSI tab movement.
+
 ## Files Recently Touched
 
 * `cmosh/cmosh_client.c`
@@ -139,7 +141,7 @@ Latest checkpoint: extended `cmosh_terminal` compatibility handling with HT/tab 
 * Focused tests were added in `cmosh_test.c` for text/cursor, overwrite + EL, SGR, LF scroll, UTF-8 wide smoke, resize-before-hostbytes ordering, EchoAck-only apply, and incomplete CSI tolerance.
 * Follow-up regression test covers colored text followed by row-tail clear: renderer must emit `ESC[0m` before `ESC[K` so colors do not bleed to the end of the screen during full redraw.
 * Latest tests cover alternate-screen enter/exit, delete-character, and insert-line behavior.
-* Rough status: renderer milestone is now about 70% of first usable parity. Remaining important gaps are live validation, more edge-case terminal controls, better wide/combining width parity with PuTTY's `mk_wcwidth`, scrollback-sensitive behavior, and later dirty-region rendering.
+* Rough status: renderer milestone is now about 75% of first usable parity. Remaining important gaps are live validation, more edge-case terminal controls as observed, better wide/combining width parity with PuTTY's `mk_wcwidth`, scrollback-sensitive behavior, and later dirty-region rendering.
 
 ## Commands Run For Latest Checkpoint
 
@@ -311,14 +313,20 @@ Latest checkpoint: extended `cmosh_terminal` compatibility handling with HT/tab 
 * Latest `cmake --build build --target cmosh --config Debug` passed after OCB/transport oversized-length checks and session input-state wrap hardening.
 * Latest `cmake --build build --target putty --config Debug` passed after OCB/transport oversized-length checks and session input-state wrap hardening.
 * Latest `git diff --check` passed with only expected CRLF conversion warnings.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after ACS/insert-mode/CSI-tab renderer compatibility.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after ACS/insert-mode/CSI-tab renderer compatibility.
+* Latest `cmake --build build --target cmosh --config Debug` passed after ACS/insert-mode/CSI-tab renderer compatibility.
+* Latest `cmake --build build --target putty --config Debug` passed after ACS/insert-mode/CSI-tab renderer compatibility.
+* Latest `git diff --check` passed with only expected CRLF conversion warnings.
 
 ## Known Issues
 
 * Full terminal correctness is not complete; output now goes through a native `cmosh_terminal` byte-stream parser and full redraw renderer with primary/alternate buffers, but broader Mosh Display/upstream parity and dirty-region rendering are still deferred. See `CMOSH_REMAINING_PLAN.md`.
+* Live-test ACS/box drawing in full-screen TUIs. Common VT100 ACS characters are mapped now, but broader charset and shift-state behavior remains intentionally minimal.
 * High-latency or lossy links may still show repeated characters; throwaway handling and resize retransmission are only mitigations.
 * Sleep/wake and interface changes should now survive transient local UDP socket close/reopen failures better, but still need live Windows testing with the freshly rebuilt `build\Debug\putty.exe`.
 * Up-arrow-after-login issue still needs investigation if it persists after the UTF-8/default rebuild; likely candidates are startup tty modes or local line discipline state before UDP readiness.
 
 ## Exact Next Step
 
-Close the running `build\Debug\putty.exe` that locked the final link step, then rebuild `cmake --build build --target putty --config Debug`. Retest bash prompt, colored `ls`, vim, less/man, Lynx/emoji pages, full-screen apps using line drawing, maximize/restore, startup history navigation, sleep/wake, local network loss/recovery, paste bursts, and large/fragmented screen updates. If redraw behavior is stable, next renderer work should be driven by observed parser gaps; otherwise the next planned internal improvement is closer width parity with PuTTY's Unicode tables and eventual dirty-region rendering.
+Retest `build\Debug\putty.exe` with bash prompt/history immediately after login, colored `ls`, vim, less/man, Lynx/emoji pages, ACS/line-drawing TUIs (`htop`, `mc`, `dialog`, tmux panes/status lines), maximize/restore, startup history navigation, sleep/wake, local network loss/recovery, paste bursts, and large/fragmented screen updates. If redraw behavior is stable, next renderer work should be driven by observed parser gaps; otherwise the next planned internal improvement is closer width parity with PuTTY's Unicode tables and eventual dirty-region rendering.
