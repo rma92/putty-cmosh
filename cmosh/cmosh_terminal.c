@@ -48,6 +48,8 @@ enum cmosh_parse_state {
 struct cmosh_terminal {
     unsigned int cols, rows;
     struct cmosh_cell *cells;
+    struct cmosh_cell *primary_cells;
+    struct cmosh_cell *alternate_cells;
     unsigned int cursor_row, cursor_col;
     unsigned int saved_cursor_row, saved_cursor_col;
     unsigned int scroll_top, scroll_bottom;
@@ -55,6 +57,7 @@ struct cmosh_terminal {
     int wrap_mode;
     int pending_wrap;
     int reverse_video;
+    int using_alternate;
     struct cmosh_attr attr;
     enum cmosh_parse_state state;
     char csi[128];
@@ -95,6 +98,8 @@ static struct cmosh_cell *cmosh_cell_at(struct cmosh_terminal *term,
     return &term->cells[(size_t)row * term->cols + col];
 }
 
+static void cmosh_move_cursor(struct cmosh_terminal *term, int row, int col);
+
 static void cmosh_clear_cell(struct cmosh_cell *cell,
                              const struct cmosh_attr *attr)
 {
@@ -123,14 +128,20 @@ static void cmosh_clear_region(struct cmosh_terminal *term, unsigned int row0,
             cmosh_clear_cell(cmosh_cell_at(term, r, c), &term->attr);
 }
 
-static void cmosh_reset_cells(struct cmosh_terminal *term)
+static void cmosh_reset_cell_buffer(struct cmosh_cell *cells,
+                                    unsigned int cols, unsigned int rows)
 {
     unsigned int r, c;
     struct cmosh_attr attr = cmosh_default_attr();
 
-    for (r = 0; r < term->rows; r++)
-        for (c = 0; c < term->cols; c++)
-            cmosh_clear_cell(cmosh_cell_at(term, r, c), &attr);
+    for (r = 0; r < rows; r++)
+        for (c = 0; c < cols; c++)
+            cmosh_clear_cell(&cells[(size_t)r * cols + c], &attr);
+}
+
+static void cmosh_reset_cells(struct cmosh_terminal *term)
+{
+    cmosh_reset_cell_buffer(term->cells, term->cols, term->rows);
 }
 
 struct cmosh_terminal *cmosh_terminal_new(unsigned int cols,
@@ -147,17 +158,23 @@ struct cmosh_terminal *cmosh_terminal_new(unsigned int cols,
         return NULL;
     term->cols = cols;
     term->rows = rows;
-    term->cells = (struct cmosh_cell *)calloc((size_t)cols * rows,
-                                              sizeof(*term->cells));
-    if (!term->cells) {
+    term->primary_cells = (struct cmosh_cell *)calloc((size_t)cols * rows,
+                                                      sizeof(*term->cells));
+    term->alternate_cells = (struct cmosh_cell *)calloc((size_t)cols * rows,
+                                                        sizeof(*term->cells));
+    if (!term->primary_cells || !term->alternate_cells) {
+        free(term->primary_cells);
+        free(term->alternate_cells);
         free(term);
         return NULL;
     }
+    term->cells = term->primary_cells;
     term->cursor_visible = 1;
     term->wrap_mode = 1;
     term->scroll_bottom = rows - 1;
     term->attr = cmosh_default_attr();
-    cmosh_reset_cells(term);
+    cmosh_reset_cell_buffer(term->primary_cells, cols, rows);
+    cmosh_reset_cell_buffer(term->alternate_cells, cols, rows);
     return term;
 }
 
@@ -165,16 +182,41 @@ void cmosh_terminal_free(struct cmosh_terminal *term)
 {
     if (!term)
         return;
-    free(term->cells);
+    free(term->primary_cells);
+    free(term->alternate_cells);
     free(term);
+}
+
+static struct cmosh_cell *cmosh_resize_cell_buffer(struct cmosh_cell *oldcells,
+                                                   unsigned int oldcols,
+                                                   unsigned int oldrows,
+                                                   unsigned int cols,
+                                                   unsigned int rows)
+{
+    struct cmosh_cell *newcells;
+    unsigned int copy_cols, copy_rows, r, c;
+    struct cmosh_attr attr;
+
+    newcells = (struct cmosh_cell *)calloc((size_t)cols * rows,
+                                           sizeof(*newcells));
+    if (!newcells)
+        return NULL;
+    attr = cmosh_default_attr();
+    for (r = 0; r < rows; r++)
+        for (c = 0; c < cols; c++)
+            cmosh_clear_cell(&newcells[(size_t)r * cols + c], &attr);
+    copy_cols = cols < oldcols ? cols : oldcols;
+    copy_rows = rows < oldrows ? rows : oldrows;
+    for (r = 0; r < copy_rows; r++)
+        memcpy(&newcells[(size_t)r * cols], &oldcells[(size_t)r * oldcols],
+               (size_t)copy_cols * sizeof(*newcells));
+    return newcells;
 }
 
 int cmosh_terminal_resize(struct cmosh_terminal *term, unsigned int cols,
                           unsigned int rows)
 {
-    struct cmosh_cell *newcells;
-    unsigned int copy_cols, copy_rows, r, c;
-    struct cmosh_attr attr;
+    struct cmosh_cell *new_primary, *new_alternate;
 
     if (!term)
         return -1;
@@ -185,22 +227,24 @@ int cmosh_terminal_resize(struct cmosh_terminal *term, unsigned int cols,
     if (cols == term->cols && rows == term->rows)
         return 0;
 
-    newcells = (struct cmosh_cell *)calloc((size_t)cols * rows,
-                                           sizeof(*newcells));
-    if (!newcells)
+    new_primary = cmosh_resize_cell_buffer(term->primary_cells, term->cols,
+                                           term->rows, cols, rows);
+    if (!new_primary)
         return -1;
-    attr = cmosh_default_attr();
-    for (r = 0; r < rows; r++)
-        for (c = 0; c < cols; c++)
-            cmosh_clear_cell(&newcells[(size_t)r * cols + c], &attr);
-    copy_cols = cols < term->cols ? cols : term->cols;
-    copy_rows = rows < term->rows ? rows : term->rows;
-    for (r = 0; r < copy_rows; r++)
-        memcpy(&newcells[(size_t)r * cols], &term->cells[(size_t)r * term->cols],
-               (size_t)copy_cols * sizeof(*newcells));
+    new_alternate = cmosh_resize_cell_buffer(term->alternate_cells,
+                                             term->cols, term->rows, cols,
+                                             rows);
+    if (!new_alternate) {
+        free(new_primary);
+        return -1;
+    }
 
-    free(term->cells);
-    term->cells = newcells;
+    free(term->primary_cells);
+    free(term->alternate_cells);
+    term->primary_cells = new_primary;
+    term->alternate_cells = new_alternate;
+    term->cells = term->using_alternate ? term->alternate_cells :
+                                      term->primary_cells;
     term->cols = cols;
     term->rows = rows;
     if (term->cursor_row >= rows)
@@ -211,6 +255,28 @@ int cmosh_terminal_resize(struct cmosh_terminal *term, unsigned int cols,
     term->scroll_bottom = rows - 1;
     term->pending_wrap = 0;
     return 0;
+}
+
+static void cmosh_use_alternate_screen(struct cmosh_terminal *term, int use,
+                                       int clear, int save_cursor)
+{
+    if (save_cursor) {
+        term->saved_cursor_row = term->cursor_row;
+        term->saved_cursor_col = term->cursor_col;
+    }
+    if (use) {
+        term->using_alternate = 1;
+        term->cells = term->alternate_cells;
+        if (clear)
+            cmosh_reset_cells(term);
+        cmosh_move_cursor(term, 0, 0);
+    } else {
+        term->using_alternate = 0;
+        term->cells = term->primary_cells;
+        if (save_cursor)
+            cmosh_move_cursor(term, term->saved_cursor_row,
+                              term->saved_cursor_col);
+    }
 }
 
 static void cmosh_scroll_up(struct cmosh_terminal *term)
@@ -225,6 +291,100 @@ static void cmosh_scroll_up(struct cmosh_terminal *term)
     for (c = 0; c < term->cols; c++)
         cmosh_clear_cell(cmosh_cell_at(term, term->scroll_bottom, c),
                          &term->attr);
+}
+
+static void cmosh_scroll_down(struct cmosh_terminal *term)
+{
+    unsigned int r, c;
+
+    if (term->scroll_top >= term->scroll_bottom)
+        return;
+    for (r = term->scroll_bottom; r > term->scroll_top; r--)
+        memcpy(cmosh_cell_at(term, r, 0), cmosh_cell_at(term, r - 1, 0),
+               (size_t)term->cols * sizeof(*term->cells));
+    for (c = 0; c < term->cols; c++)
+        cmosh_clear_cell(cmosh_cell_at(term, term->scroll_top, c),
+                         &term->attr);
+}
+
+static void cmosh_insert_blank_chars(struct cmosh_terminal *term,
+                                     unsigned int count)
+{
+    unsigned int col;
+
+    if (!count)
+        count = 1;
+    if (count > term->cols - term->cursor_col)
+        count = term->cols - term->cursor_col;
+    for (col = term->cols; col-- > term->cursor_col + count;)
+        *cmosh_cell_at(term, term->cursor_row, col) =
+            *cmosh_cell_at(term, term->cursor_row, col - count);
+    for (col = term->cursor_col; col < term->cursor_col + count; col++)
+        cmosh_clear_cell(cmosh_cell_at(term, term->cursor_row, col),
+                         &term->attr);
+}
+
+static void cmosh_delete_chars(struct cmosh_terminal *term,
+                               unsigned int count)
+{
+    unsigned int col;
+
+    if (!count)
+        count = 1;
+    if (count > term->cols - term->cursor_col)
+        count = term->cols - term->cursor_col;
+    for (col = term->cursor_col; col + count < term->cols; col++)
+        *cmosh_cell_at(term, term->cursor_row, col) =
+            *cmosh_cell_at(term, term->cursor_row, col + count);
+    for (; col < term->cols; col++)
+        cmosh_clear_cell(cmosh_cell_at(term, term->cursor_row, col),
+                         &term->attr);
+}
+
+static void cmosh_insert_lines(struct cmosh_terminal *term,
+                               unsigned int count)
+{
+    unsigned int r, c, bottom, first_move;
+
+    if (term->cursor_row < term->scroll_top ||
+        term->cursor_row > term->scroll_bottom)
+        return;
+    if (!count)
+        count = 1;
+    bottom = term->scroll_bottom;
+    if (count > bottom - term->cursor_row + 1)
+        count = bottom - term->cursor_row + 1;
+    first_move = term->cursor_row + count;
+    for (r = bottom; r >= first_move; r--) {
+        memcpy(cmosh_cell_at(term, r, 0), cmosh_cell_at(term, r - count, 0),
+               (size_t)term->cols * sizeof(*term->cells));
+        if (r == 0)
+            break;
+    }
+    for (r = term->cursor_row; r < term->cursor_row + count; r++)
+        for (c = 0; c < term->cols; c++)
+            cmosh_clear_cell(cmosh_cell_at(term, r, c), &term->attr);
+}
+
+static void cmosh_delete_lines(struct cmosh_terminal *term,
+                               unsigned int count)
+{
+    unsigned int r, c, bottom;
+
+    if (term->cursor_row < term->scroll_top ||
+        term->cursor_row > term->scroll_bottom)
+        return;
+    if (!count)
+        count = 1;
+    bottom = term->scroll_bottom;
+    if (count > bottom - term->cursor_row + 1)
+        count = bottom - term->cursor_row + 1;
+    for (r = term->cursor_row; r + count <= bottom; r++)
+        memcpy(cmosh_cell_at(term, r, 0), cmosh_cell_at(term, r + count, 0),
+               (size_t)term->cols * sizeof(*term->cells));
+    for (; r <= bottom; r++)
+        for (c = 0; c < term->cols; c++)
+            cmosh_clear_cell(cmosh_cell_at(term, r, c), &term->attr);
 }
 
 static void cmosh_lf(struct cmosh_terminal *term)
@@ -478,6 +638,23 @@ static void cmosh_apply_csi(struct cmosh_terminal *term, char final)
         cmosh_move_cursor(term, (int)term->cursor_row,
                           (int)term->cursor_col - n);
         break;
+      case 'E':
+        n = cmosh_param(params, nparams, 0, 1);
+        cmosh_move_cursor(term, (int)term->cursor_row + n, 0);
+        break;
+      case 'F':
+        n = cmosh_param(params, nparams, 0, 1);
+        cmosh_move_cursor(term, (int)term->cursor_row - n, 0);
+        break;
+      case 'G':
+      case '`':
+        cmosh_move_cursor(term, (int)term->cursor_row,
+                          cmosh_param(params, nparams, 0, 1) - 1);
+        break;
+      case 'd':
+        cmosh_move_cursor(term, cmosh_param(params, nparams, 0, 1) - 1,
+                          (int)term->cursor_col);
+        break;
       case 'J':
         n = cmosh_param(params, nparams, 0, 0);
         if (n == 2)
@@ -510,6 +687,33 @@ static void cmosh_apply_csi(struct cmosh_terminal *term, char final)
                                term->cursor_row,
                                term->cursor_col + (unsigned int)n - 1);
         break;
+      case '@':
+        cmosh_insert_blank_chars(term,
+                                 (unsigned int)cmosh_param(params, nparams,
+                                                           0, 1));
+        break;
+      case 'P':
+        cmosh_delete_chars(term,
+                           (unsigned int)cmosh_param(params, nparams, 0, 1));
+        break;
+      case 'L':
+        cmosh_insert_lines(term,
+                           (unsigned int)cmosh_param(params, nparams, 0, 1));
+        break;
+      case 'M':
+        cmosh_delete_lines(term,
+                           (unsigned int)cmosh_param(params, nparams, 0, 1));
+        break;
+      case 'S':
+        n = cmosh_param(params, nparams, 0, 1);
+        while (n-- > 0)
+            cmosh_scroll_up(term);
+        break;
+      case 'T':
+        n = cmosh_param(params, nparams, 0, 1);
+        while (n-- > 0)
+            cmosh_scroll_down(term);
+        break;
       case 'm':
         cmosh_apply_sgr(term, params, nparams);
         break;
@@ -540,6 +744,18 @@ static void cmosh_apply_csi(struct cmosh_terminal *term, char final)
                     term->reverse_video = set;
                 else if (params[i] == 7)
                     term->wrap_mode = set;
+                else if (params[i] == 1047)
+                    cmosh_use_alternate_screen(term, set, set, 0);
+                else if (params[i] == 1048) {
+                    if (set) {
+                        term->saved_cursor_row = term->cursor_row;
+                        term->saved_cursor_col = term->cursor_col;
+                    } else {
+                        cmosh_move_cursor(term, term->saved_cursor_row,
+                                          term->saved_cursor_col);
+                    }
+                } else if (params[i] == 1049)
+                    cmosh_use_alternate_screen(term, set, set, 1);
             }
         }
         break;
@@ -640,6 +856,20 @@ static void cmosh_terminal_byte(struct cmosh_terminal *term, unsigned char ch)
         } else if (ch == '8') {
             cmosh_move_cursor(term, term->saved_cursor_row,
                               term->saved_cursor_col);
+            term->state = CMOSH_PARSE_NORMAL;
+        } else if (ch == 'D') {
+            cmosh_lf(term);
+            term->state = CMOSH_PARSE_NORMAL;
+        } else if (ch == 'E') {
+            term->cursor_col = 0;
+            cmosh_lf(term);
+            term->state = CMOSH_PARSE_NORMAL;
+        } else if (ch == 'M') {
+            if (term->cursor_row == term->scroll_top)
+                cmosh_scroll_down(term);
+            else if (term->cursor_row)
+                term->cursor_row--;
+            term->pending_wrap = 0;
             term->state = CMOSH_PARSE_NORMAL;
         } else {
             term->state = CMOSH_PARSE_NORMAL;

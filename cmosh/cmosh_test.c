@@ -540,6 +540,30 @@ static void test_terminal(void)
           "terminal resets attributes before clearing row tail");
     cmosh_terminal_free(term);
 
+    term = cmosh_terminal_new(10, 3);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"abcde\r\033[2P", 10) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "cde") &&
+              !buffer_contains(out, n, "abcde"),
+          "terminal delete chars");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(10, 3);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"\033[1;1Hone\033[2;1Htwo"
+                                            "\033[3;1Hthree\033[2;1H"
+                                            "\033[LX",
+              39) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "one") &&
+              buffer_contains(out, n, "X") &&
+              buffer_contains(out, n, "two"),
+          "terminal insert line");
+    cmosh_terminal_free(term);
+
     term = cmosh_terminal_new(5, 3);
     check(cmosh_terminal_apply_bytes(
               term, (const unsigned char *)"one\ntwo\nthree\nfour", 18) ==
@@ -549,6 +573,24 @@ static void test_terminal(void)
               !buffer_contains(out, n, "one") &&
               buffer_contains(out, n, "four"),
           "terminal LF scrolling");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(10, 3);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"main\033[?1049halt", 15) ==
+              0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "alt") &&
+              !buffer_contains(out, n, "main"),
+          "terminal alternate screen enter renders alternate buffer");
+    check(cmosh_terminal_apply_bytes(term, (const unsigned char *)"\033[?1049l",
+                                     8) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "main") &&
+              !buffer_contains(out, n, "alt"),
+          "terminal alternate screen exit restores primary buffer");
     cmosh_terminal_free(term);
 
     term = cmosh_terminal_new(8, 2);

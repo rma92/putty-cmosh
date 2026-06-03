@@ -4,7 +4,7 @@
 
 Continue stabilizing native PuTTY Mosh and `cmosh`, with emphasis on UDP robustness, input retransmission correctness, terminal redraw behavior, and eventual replacement of raw host-output rendering with a real terminal-state model.
 
-Latest checkpoint: fixed two first-renderer follow-ups. Full redraw now resets SGR before row-tail `ESC[K` so a colored cell does not make clear-to-EOL paint the rest of the screen in that color. PuTTY resize coalescing now caps an existing pending resize's local pending-input barrier to the current pending-input length, avoiding stale delay while preserving the original ordering point.
+Latest checkpoint: added alternate-screen support and common cursor/editing controls to `cmosh_terminal`. The renderer now keeps primary and alternate buffers, switches on DEC private `?1047/?1048/?1049`, and handles additional CSI/ESC controls used by full-screen apps. User confirmed the resize behavior now works.
 
 Latest user feedback: maximize/restore works, and the previously failing Lynx/emoji-heavy page now works after receive-side fragment reassembly. User asked to continue and prioritize transport hardening. User also previously reported that sometimes pressing Up for shell history just after login moves the cursor up a line.
 
@@ -128,14 +128,16 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 ## Latest Renderer Checkpoint
 
 * Added `cmosh_terminal_new/free/resize/apply_bytes/render_full/render_full_to_buffer`.
-* Parser scope now covers printable UTF-8, CR/LF/BS/BEL, ESC save/restore cursor, CSI `H/f/A/B/C/D/J/K/X/m/r`, DEC private `?25`, `?5`, `?7`, and OSC consumption through BEL/ST.
-* Screen model stores fixed-size cells with UTF-8 text, width, dirty flag, current SGR attributes, cursor position/visibility, scroll region, wrap mode, and pending wrap.
+* Parser scope now covers printable UTF-8, CR/LF/BS/BEL, ESC save/restore cursor, ESC index/next-line/reverse-index, CSI `H/f/A/B/C/D/E/F/G/\`/d/J/K/X/@/P/L/M/S/T/m/r`, DEC private `?25`, `?5`, `?7`, `?1047`, `?1048`, `?1049`, and OSC consumption through BEL/ST.
+* Screen model stores primary and alternate fixed-size cell buffers with UTF-8 text, width, dirty flag, current SGR attributes, cursor position/visibility, scroll region, wrap mode, and pending wrap.
 * Full redraw emits hide cursor, reset attributes, clear/home, all visible row text with conservative SGR changes, clear-to-EOL per row, then restores cursor and cursor visibility.
 * `cmosh_decode_host_apply` now preserves existing malformed-field rejection and unknown-valid-field skipping while adding ordered callbacks for HostBytes field 2, ResizeMessage field 3, and EchoAck field 7 from upstream `mosh/src/protobufs/hostinput.proto`.
 * PuTTY `Mosh` owns a `struct cmosh_terminal *terminal`, initialised at 80x24 and resized on backend size events and decoded host resize instructions.
 * Standalone `cmosh` owns the same terminal model and renders through the same host apply path for parity.
 * Focused tests were added in `cmosh_test.c` for text/cursor, overwrite + EL, SGR, LF scroll, UTF-8 wide smoke, resize-before-hostbytes ordering, EchoAck-only apply, and incomplete CSI tolerance.
 * Follow-up regression test covers colored text followed by row-tail clear: renderer must emit `ESC[0m` before `ESC[K` so colors do not bleed to the end of the screen during full redraw.
+* Latest tests cover alternate-screen enter/exit, delete-character, and insert-line behavior.
+* Rough status: renderer milestone is now about 70% of first usable parity. Remaining important gaps are live validation, more edge-case terminal controls, better wide/combining width parity with PuTTY's `mk_wcwidth`, scrollback-sensitive behavior, and later dirty-region rendering.
 
 ## Commands Run For Latest Checkpoint
 
@@ -149,6 +151,11 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Follow-up: `cmake --build build --target cmosh --config Debug` - passed, with existing MSBuild manifest warning.
 * Follow-up: `cmake --build build --target putty --config Debug` - compile reached link, but failed with `LNK1168` because `build\Debug\putty.exe` was running and locked for writing by PID 3376.
 * Follow-up: `git diff --check` - passed; Git reported only existing LF-to-CRLF working-copy warnings.
+* Latest: `cmake --build build --target test_cmosh --config Debug` - passed, with existing MSBuild manifest warning.
+* Latest: `.\build\cmosh\Debug\test_cmosh.exe` - passed.
+* Latest: `cmake --build build --target cmosh --config Debug` - passed, with existing MSBuild manifest warning.
+* Latest: `cmake --build build --target putty --config Debug` - passed, with existing MSBuild manifest warning.
+* Latest: `git diff --check` - passed; Git reported only existing LF-to-CRLF working-copy warnings.
 
 * Decoded transport instructions must match `CMOSH_PROTOCOL_VERSION` before client state, ACK trimming, or host output can be affected.
 * No-diff server-state transitions still advance state and commit retained ACK/throwaway metadata. Stale no-diff transitions must not advance server state, though their authenticated ACK/throwaway fields may still trim input after high-level validation.
@@ -312,4 +319,4 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 
 ## Exact Next Step
 
-Retest the freshly rebuilt `build\Debug\putty.exe` on bash prompt, colored `ls`, vim, Lynx/emoji pages, maximize/restore, startup history navigation, sleep/wake, local network loss/recovery, paste bursts, and large/fragmented screen updates. If redraw behavior is stable, the next renderer work is alternate-screen support and broader Display/upstream parity; if live tests show parser gaps, add the smallest CSI/OSC support and focused tests first.
+Retest the freshly rebuilt `build\Debug\putty.exe` on bash prompt, colored `ls`, vim, less/man, Lynx/emoji pages, maximize/restore, startup history navigation, sleep/wake, local network loss/recovery, paste bursts, and large/fragmented screen updates. If redraw behavior is stable, next renderer work should be driven by observed parser gaps; otherwise the next planned internal improvement is closer width parity with PuTTY's Unicode tables and eventual dirty-region rendering.
