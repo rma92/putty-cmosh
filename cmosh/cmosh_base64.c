@@ -80,7 +80,7 @@ int cmosh_base64_encode(const unsigned char *in, size_t inlen, char *out,
             x |= (unsigned int)in[i + 1] << 8;
         if (rem > 2)
             x |= in[i + 2];
-        if (n + 4 >= outlen)
+        if (n > outlen || outlen - n <= 4)
             return -1;
         out[n++] = alphabet[(x >> 18) & 0x3f];
         out[n++] = alphabet[(x >> 12) & 0x3f];

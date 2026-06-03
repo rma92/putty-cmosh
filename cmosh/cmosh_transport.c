@@ -116,7 +116,7 @@ int cmosh_transport_make_packet(const unsigned char key[16], uint64_t seq,
     if (cmosh_encode_fragment(seq, 0, 1, compressed, compressed_len, fragment,
                               sizeof(fragment), &fragment_len) != 0)
         return -1;
-    if (fragment_len + 4 > sizeof(plain))
+    if (fragment_len > sizeof(plain) - 4)
         return -1;
 
     plain[0] = (unsigned char)(timestamp >> 8);
@@ -218,7 +218,7 @@ static int cmosh_transport_reassemble_fragment(
         return 1;
 
     for (i = 0; i < st->fragment_total; i++) {
-        if (!st->fragments[i].present ||
+        if (!st->fragments[i].present || pos > assembled_len ||
             st->fragments[i].len > assembled_len - pos)
             return -1;
         if (st->fragments[i].len)

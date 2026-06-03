@@ -119,7 +119,8 @@ int cmosh_input_record_diff(struct cmosh_input_state *st,
                             unsigned char *diffbuf, size_t diffbuf_len,
                             size_t *diff_len)
 {
-    if (!st || !rec || rec->off + rec->len > st->bytes_len)
+    if (!st || !rec || rec->off > st->bytes_len ||
+        rec->len > st->bytes_len - rec->off)
         return -1;
     if (rec->encoded_diff) {
         if (rec->len > diffbuf_len || !diff_len)

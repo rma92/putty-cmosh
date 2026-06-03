@@ -8,6 +8,7 @@ static int cmosh_client_input_has_room(const struct cmosh_client *client,
 {
     if (!client || !len ||
         client->input.nrecords >= CMOSH_INPUT_MAX_RECORDS ||
+        client->input.current == UINT64_MAX ||
         len > sizeof(client->input.bytes) - client->input.bytes_len)
         return 0;
     return 1;

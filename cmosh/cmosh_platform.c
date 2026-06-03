@@ -384,7 +384,7 @@ static int append_raw(char *buf, size_t buflen, size_t *pos, const char *s)
     if (!s)
         return -1;
     len = strlen(s);
-    if (*pos + len >= buflen)
+    if (*pos >= buflen || len >= buflen - *pos)
         return -1;
     memcpy(buf + *pos, s, len);
     *pos += len;
@@ -413,17 +413,17 @@ int cmosh_run_bootstrap_command(const char *ssh_command, const char *host,
     cmd[pos++] = '"'; /* Outer cmd.exe /c quote pair. */
 #endif
     if (append_raw(cmd, sizeof(cmd), &pos, ssh_command) ||
-        pos + 2 >= sizeof(cmd))
+        pos >= sizeof(cmd) - 2)
         return -1;
     cmd[pos++] = ' ';
     if (append_quoted(cmd, sizeof(cmd), &pos, host) ||
-        pos + 2 >= sizeof(cmd))
+        pos >= sizeof(cmd) - 2)
         return -1;
     cmd[pos++] = ' ';
     if (append_quoted(cmd, sizeof(cmd), &pos, remote_command))
         return -1;
 #ifdef _WIN32
-    if (pos + 1 >= sizeof(cmd))
+    if (pos >= sizeof(cmd) - 1)
         return -1;
     cmd[pos++] = '"';
 #endif

@@ -44,6 +44,8 @@ int cmosh_parse_startup(const char *text, struct cmosh_bootstrap *out)
             size_t key64_len, key_len;
             const char *q = line + 13;
 
+            if (saw_connect)
+                return -1;
             q = skip_space(q);
             port = strtoul(q, &endptr, 10);
             if (endptr == q || port == 0 || port > 65535)

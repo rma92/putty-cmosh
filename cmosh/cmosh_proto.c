@@ -65,7 +65,7 @@ static int put_bytes(unsigned char *buf, size_t buflen, size_t *pos,
     if (put_key(buf, buflen, pos, field, 2) ||
         cmosh_pb_put_varint(buf, buflen, pos, data_len))
         return -1;
-    if (*pos + data_len > buflen)
+    if (*pos > buflen || data_len > buflen - *pos)
         return -1;
     if (data_len)
         memcpy(buf + *pos, data, data_len);
@@ -153,7 +153,7 @@ int cmosh_decode_transport_instruction(const unsigned char *buf, size_t buflen,
             }
         } else if (wire_type == 2) {
             if (cmosh_pb_get_varint(buf, buflen, &pos, &len) != 0 ||
-                len > buflen - pos)
+                pos > buflen || len > buflen - pos)
                 return -1;
             if (field == 6) {
                 out->diff_len = (size_t)len;
@@ -168,11 +168,11 @@ int cmosh_decode_transport_instruction(const unsigned char *buf, size_t buflen,
             }
             pos += (size_t)len;
         } else if (wire_type == 1) {
-            if (pos + 8 > buflen)
+            if (pos > buflen || buflen - pos < 8)
                 return -1;
             pos += 8;
         } else if (wire_type == 5) {
-            if (pos + 4 > buflen)
+            if (pos > buflen || buflen - pos < 4)
                 return -1;
             pos += 4;
         } else {
@@ -200,7 +200,7 @@ int cmosh_encode_user_input(const struct cmosh_user_input *msg,
         if (put_key(buf, buflen, &pos, 2, 2) ||
             cmosh_pb_put_varint(buf, buflen, &pos, msg->keys_len))
             return -1;
-        if (pos + msg->keys_len > buflen)
+        if (pos > buflen || msg->keys_len > buflen - pos)
             return -1;
         memcpy(buf + pos, msg->keys, msg->keys_len);
         pos += msg->keys_len;
@@ -280,7 +280,7 @@ static int cmosh_host_output_copy(void *vctx, const unsigned char *data,
     struct cmosh_host_output_copy_ctx *ctx =
         (struct cmosh_host_output_copy_ctx *)vctx;
 
-    if (ctx->written + len > ctx->outlen)
+    if (ctx->written > ctx->outlen || len > ctx->outlen - ctx->written)
         return -1;
     if (len)
         memcpy(ctx->out + ctx->written, data, len);
@@ -297,18 +297,18 @@ static int cmosh_pb_skip_field(const unsigned char *buf, size_t buflen,
       case 0:
         return cmosh_pb_get_varint(buf, buflen, pos, &ignored);
       case 1:
-        if (buflen - *pos < 8)
+        if (*pos > buflen || buflen - *pos < 8)
             return -1;
         *pos += 8;
         return 0;
       case 2:
         if (cmosh_pb_get_varint(buf, buflen, pos, &len) != 0 ||
-            len > buflen - *pos)
+            *pos > buflen || len > buflen - *pos)
             return -1;
         *pos += (size_t)len;
         return 0;
       case 5:
-        if (buflen - *pos < 4)
+        if (*pos > buflen || buflen - *pos < 4)
             return -1;
         *pos += 4;
         return 0;
@@ -330,6 +330,8 @@ static int decode_host_bytes(const unsigned char *buf, size_t buflen,
             return -1;
         field = (unsigned int)(key >> 3);
         wire_type = (unsigned int)(key & 7);
+        if (field == 0)
+            return -1;
         if (wire_type == 2) {
             if (cmosh_pb_get_varint(buf, buflen, &pos, &len) != 0 ||
                 len > buflen - pos)
@@ -360,6 +362,8 @@ static int decode_host_instruction(const unsigned char *buf, size_t buflen,
             return -1;
         field = (unsigned int)(key >> 3);
         wire_type = (unsigned int)(key & 7);
+        if (field == 0)
+            return -1;
         if (wire_type == 2) {
             if (cmosh_pb_get_varint(buf, buflen, &pos, &len) != 0 ||
                 len > buflen - pos)
@@ -392,6 +396,8 @@ int cmosh_decode_host_output_cb(const unsigned char *buf, size_t buflen,
             return -1;
         field = (unsigned int)(key >> 3);
         wire_type = (unsigned int)(key & 7);
+        if (field == 0)
+            return -1;
         if (wire_type == 2) {
             if (cmosh_pb_get_varint(buf, buflen, &pos, &len) != 0 ||
                 len > buflen - pos)

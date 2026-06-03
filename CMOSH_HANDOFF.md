@@ -121,6 +121,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * PuTTY Mosh caps pre-`MOSH CONNECT` bootstrap output at 64 KiB with overflow-safe accounting; the bootstrap parser only needs the startup lines, so unbounded stderr/stdout is treated as fatal.
 * Base64 bootstrap key decoding now rejects truncated unpadded input, excessive padding, and data after padding. Mosh server keys should be canonical padded base64.
 * Protobuf varint decoding rejects uint64 overflow, transport instructions reject field 0, and unknown fixed32/fixed64 transport fields are skipped instead of dropping otherwise valid packets.
+* Host-output protobuf decoding also rejects field 0, while still skipping unknown valid wire types. Output copy and protobuf buffer helpers use subtraction-based bounds checks to avoid size_t wraparound.
+* Input/resize packet constructors now refuse to enqueue when the local input state is already `UINT64_MAX`, preventing client-state wraparound in encoded packets.
 * Standalone `cmosh` ignores optional post-start-ACK packets that do not advance server state and falls back to the first authenticated server state.
 * Once the PuTTY backend accepts terminal input, it must either retain it in `pending_input` or enqueue it in cmosh retransmission state; do not silently drop the tail of an oversized send.
 * Server `throwaway_num` is equivalent to an ACK for retransmission purposes: queued input up to that state must be trimmed and must not be retransmitted.
@@ -243,6 +245,10 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after base64/protobuf parser hardening and standalone post-ACK state validation.
 * Latest `cmake --build build --target cmosh --config Debug` passed after base64/protobuf parser hardening and standalone post-ACK state validation.
 * Latest `cmake --build build --target putty --config Debug` passed after base64/protobuf parser hardening and standalone post-ACK state validation.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after host-output field-zero rejection, overflow-safe bounds checks, duplicate-connect rejection, and input-state wrap prevention.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after host-output field-zero rejection, overflow-safe bounds checks, duplicate-connect rejection, and input-state wrap prevention.
+* Latest `cmake --build build --target cmosh --config Debug` passed after host-output field-zero rejection, overflow-safe bounds checks, duplicate-connect rejection, and input-state wrap prevention.
+* Latest `cmake --build build --target putty --config Debug` passed after host-output field-zero rejection, overflow-safe bounds checks, duplicate-connect rejection, and input-state wrap prevention.
 
 ## Known Issues
 

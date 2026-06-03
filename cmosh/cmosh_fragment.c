@@ -68,8 +68,10 @@ static int cmosh_zlib_store_decompress_simple(const unsigned char *in,
         len = (unsigned int)in[pos] | ((unsigned int)in[pos + 1] << 8);
         nlen = (unsigned int)in[pos + 2] | ((unsigned int)in[pos + 3] << 8);
         pos += 4;
-        if (((len ^ nlen) & 0xffffU) != 0xffffU || pos + len + 4 > inlen ||
-            opos + len > outlen)
+        if (((len ^ nlen) & 0xffffU) != 0xffffU ||
+            pos > inlen || len > inlen - pos ||
+            inlen - pos - len < 4 ||
+            opos > outlen || len > outlen - opos)
             return -1;
         memcpy(out + opos, in + pos, len);
         pos += len;

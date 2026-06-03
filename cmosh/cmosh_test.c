@@ -141,6 +141,11 @@ static void test_bootstrap(void)
     check(boot.port == 60001, "parse startup port");
     check(strcmp(boot.ip, "203.0.113.9") == 0, "parse startup ip");
     check(boot.key[0] == 0 && boot.key[15] == 15, "parse startup key");
+    check(cmosh_parse_startup(
+              "MOSH CONNECT 60001 AAECAwQFBgcICQoLDA0ODw==\n"
+              "MOSH CONNECT 60002 AAECAwQFBgcICQoLDA0ODw==\n",
+              &boot) != 0,
+          "parse startup rejects duplicate connect");
     check(cmosh_build_remote_command("mosh-server", "60000:61000",
                                      "en_US.UTF-8", 1, 0, 1, command,
                                      sizeof(command)) == 0 &&
@@ -276,6 +281,16 @@ static void test_proto(void)
               12, buf, sizeof(buf), &n) == 0 &&
               n == 1 && buf[0] == 'Z',
           "skip unknown fixed-width host fields");
+    check(cmosh_decode_host_output((const unsigned char *)"\x00", 1,
+                                   buf, sizeof(buf), &n) != 0,
+          "reject top-level host field zero");
+    check(cmosh_decode_host_output((const unsigned char *)"\x0a\x01\x00", 3,
+                                   buf, sizeof(buf), &n) != 0,
+          "reject host instruction field zero");
+    check(cmosh_decode_host_output(
+              (const unsigned char *)"\x0a\x03\x12\x01\x00", 5,
+              buf, sizeof(buf), &n) != 0,
+          "reject host bytes field zero");
     {
         unsigned char top[9300], instruction[9200], hostbytes[9100];
         unsigned char data[9000];
@@ -1111,6 +1126,23 @@ static void test_client(void)
                                    sizeof(packet), &n) == 0 &&
               client.input.current == 12 && client.input.nrecords == 1,
           "client make resize tracks input state");
+    {
+        struct cmosh_client wrap_client;
+
+        cmosh_client_init(&wrap_client, key, UINT64_MAX, 5,
+                          CMOSH_SERVER_NONCE_BASE | 10, 0, 7);
+        check(cmosh_client_make_input(
+                  &wrap_client, (const unsigned char *)"x", 1, 100,
+                  0x399a, packet, sizeof(packet), &n) != 0 &&
+                  wrap_client.input.current == UINT64_MAX &&
+                  wrap_client.send_seq == 7,
+              "client input refuses state wrap");
+        check(cmosh_client_make_resize(&wrap_client, 80, 24, 100, 0x399b,
+                                       packet, sizeof(packet), &n) != 0 &&
+                  wrap_client.input.current == UINT64_MAX &&
+                  wrap_client.send_seq == 7,
+              "client resize refuses state wrap");
+    }
     memset(&ti, 0, sizeof(ti));
     check(cmosh_transport_decode_packet(key, packet, n, &ti, diff,
                                         sizeof(diff), &timestamp, &timestamp,
