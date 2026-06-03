@@ -15,6 +15,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * `cmosh/cmosh_test.c`
 * `cmosh/cmosh_base64.c`
 * `cmosh/cmosh_fragment.c`
+* `cmosh/cmosh_ocb.c`
+* `cmosh/cmosh_transport.c`
 * `otherbackends/mosh.c`
 * `windows/window.c`
 * `AGENTS.md`
@@ -40,6 +42,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Fragment reassembly is held in `cmosh_transport_state`; `cmosh_client_recv_packet` now returns `CMOSH_CLIENT_RECV_PENDING` while waiting for remaining fragments and does not ACK a server state until the full instruction is decoded/applied.
 * Fragment assembly is now cleared if a malformed/conflicting fragment arrives or if a complete single-fragment packet arrives while an old partial assembly is pending. This avoids stale fragment state poisoning later receives.
 * `cmosh_client_make_input` now validates/encodes input before appending it to the retransmission queue, and rejects chunks larger than `CMOSH_CLIENT_INPUT_CHUNK_MAX`. PuTTY Mosh splits larger backend sends into protocol-sized input packets.
+* The reusable session layer now also refuses input-state wrap at `UINT64_MAX`, not just the higher-level client packet constructors.
 * Empty idle keepalives are now rate-limited to `CMOSH_CLIENT_IDLE_KEEPALIVE_MS` (1s). Retransmits, missing-state diagnostics, and UDP-timeout probes still force an idle packet.
 * Client packet constructors avoid mutating send sequence or input retransmission records until packet encoding succeeds. This keeps failed ACK/input/resize/idle packet construction from drifting client state.
 * Standalone `cmosh` now ACKs duplicate server packets, matching the PuTTY backend and helping the server recover if our previous ACK was lost.
@@ -126,6 +129,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Protobuf varint decoding rejects uint64 overflow, transport instructions reject field 0, and unknown fixed32/fixed64 transport fields are skipped instead of dropping otherwise valid packets.
 * Unknown protobuf fields with valid fixed32/fixed64/length-delimited wire data can be skipped, but truncated fixed-width or length-delimited unknown fields remain malformed.
 * Fragment/zlib encoder capacity checks must be subtraction-based (`payload_len > outlen - header`) so invalid caller lengths cannot wrap addition-based checks.
+* OCB and transport packet encryption capacity checks must be subtraction-based before pointer arithmetic or encryption loops run. Oversized caller lengths must fail immediately.
 * Host-output protobuf decoding also rejects field 0, while still skipping unknown valid wire types. Output copy and protobuf buffer helpers use subtraction-based bounds checks to avoid size_t wraparound.
 * Input/resize packet constructors now refuse to enqueue when the local input state is already `UINT64_MAX`, preventing client-state wraparound in encoded packets.
 * Standalone `cmosh` ignores optional post-start-ACK packets that do not advance server state and falls back to the first authenticated server state.
@@ -259,6 +263,11 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `cmake --build build --target cmosh --config Debug` passed after fixing unpadded `MOSH CONNECT` base64 acceptance and adding malformed unknown-field/bounds regression tests.
 * Latest `cmake --build build --target putty --config Debug` passed after fixing unpadded `MOSH CONNECT` base64 acceptance and adding malformed unknown-field/bounds regression tests.
 * Latest `git diff --check` passed with only expected CRLF conversion warnings.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after OCB/transport oversized-length checks and session input-state wrap hardening.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after OCB/transport oversized-length checks and session input-state wrap hardening.
+* Latest `cmake --build build --target cmosh --config Debug` passed after OCB/transport oversized-length checks and session input-state wrap hardening.
+* Latest `cmake --build build --target putty --config Debug` passed after OCB/transport oversized-length checks and session input-state wrap hardening.
+* Latest `git diff --check` passed with only expected CRLF conversion warnings.
 
 ## Known Issues
 
@@ -269,4 +278,4 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 
 ## Exact Next Step
 
-Retest the freshly rebuilt `build\Debug\putty.exe` startup path first; this checkpoint fixed a regression where strict base64 parsing caused `Mosh SSH bootstrap ended without MOSH CONNECT` for unpadded server keys. Then continue lossy-link testing: sleep/wake, local network loss/recovery, paste bursts, rapid command-history navigation immediately after login, resize/maximize/restore under load, and large/fragmented screen updates. Watch for throttled UDP send and input ACK/throwaway Event Log lines to correlate any repeated-character reports.
+Retest the freshly rebuilt `build\Debug\putty.exe` on startup and lossy-link paths: sleep/wake, local network loss/recovery, paste bursts, rapid command-history navigation immediately after login, resize/maximize/restore under load, and large/fragmented screen updates. Watch for throttled UDP send and input ACK/throwaway Event Log lines to correlate any repeated-character reports. Protocol hardening is now mostly down to live validation and any bugs surfaced by that testing; remaining major implementation gap is still the full Mosh terminal-state renderer.

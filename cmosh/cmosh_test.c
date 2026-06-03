@@ -130,6 +130,9 @@ static void test_aes_ocb(void)
                             sizeof(got), &outlen) == 0 &&
               outlen == 8 && memcmp(got, plain, 8) == 0,
           "ocb short decrypt");
+    check(cmosh_ocb_encrypt(key, nonce, n, 0, 0, plain, (size_t)-1, out,
+                            sizeof(out), &outlen) != 0,
+          "ocb encrypt rejects oversized plaintext length");
 }
 
 static void test_bootstrap(void)
@@ -494,6 +497,10 @@ static void test_transport(void)
                                          sizeof(msg) - 1, packet,
                                          sizeof(packet), &n) == 0,
           "transport encrypt packet");
+    check(cmosh_transport_encrypt_packet(
+              key, CMOSH_CLIENT_NONCE_BASE | 2, msg, (size_t)-1, packet,
+              sizeof(packet), &n) != 0,
+          "transport encrypt rejects oversized plaintext length");
     check(cmosh_transport_decrypt_packet(key, packet, n, plain, sizeof(plain),
                                          &n, &seq) == 0 &&
               seq == (CMOSH_CLIENT_NONCE_BASE | 1) && n == sizeof(msg) - 1 &&
@@ -868,6 +875,15 @@ static void test_session(void)
               diff_len == 7 && memcmp(diff, "\x0a\x05\x12\x03\x22\x01", 6) == 0 &&
               diff[6] == 'c',
           "session input retransmit diff");
+    cmosh_input_init(&input, UINT64_MAX);
+    check(cmosh_input_append(&input, (const unsigned char *)"x", 1,
+                             300) != 0 &&
+              input.current == UINT64_MAX && input.nrecords == 0,
+          "session input append refuses state wrap");
+    check(cmosh_input_append_diff(&input, (const unsigned char *)"x", 1,
+                                  300) != 0 &&
+              input.current == UINT64_MAX && input.nrecords == 0,
+          "session input append diff refuses state wrap");
 
     cmosh_server_queue_init(&queue);
     check(cmosh_server_queue_add(&queue, 1, 2,

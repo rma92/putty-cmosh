@@ -20,7 +20,8 @@ int cmosh_input_append(struct cmosh_input_state *st,
 
     if (!keys_len)
         return 0;
-    if (!st || !keys || st->nrecords >= CMOSH_INPUT_MAX_RECORDS ||
+    if (!st || !keys || st->current == UINT64_MAX ||
+        st->nrecords >= CMOSH_INPUT_MAX_RECORDS ||
         keys_len > sizeof(st->bytes) - st->bytes_len)
         return -1;
 
@@ -45,7 +46,8 @@ int cmosh_input_append_diff(struct cmosh_input_state *st,
 
     if (!diff_len)
         return 0;
-    if (!st || !diff || st->nrecords >= CMOSH_INPUT_MAX_RECORDS ||
+    if (!st || !diff || st->current == UINT64_MAX ||
+        st->nrecords >= CMOSH_INPUT_MAX_RECORDS ||
         diff_len > sizeof(st->bytes) - st->bytes_len)
         return -1;
 

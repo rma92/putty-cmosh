@@ -121,7 +121,8 @@ int cmosh_ocb_encrypt(const uint8_t key[16], const uint8_t *nonce,
     size_t full = plain_len / 16, rem = plain_len % 16, i;
 
     if (!key || !nonce || nonce_len == 0 || nonce_len > 15 || !out ||
-        !written || out_len < plain_len + CMOSH_OCB_TAG_LEN ||
+        !written || out_len < CMOSH_OCB_TAG_LEN ||
+        plain_len > out_len - CMOSH_OCB_TAG_LEN ||
         (plain_len && !plain) || (ad_len && !ad))
         return -1;
 

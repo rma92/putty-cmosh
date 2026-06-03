@@ -355,7 +355,10 @@ int cmosh_transport_encrypt_packet(const unsigned char key[16], uint64_t seq,
     size_t crypt_len;
 
     if (!key || !packet || !written ||
-        packet_len < CMOSH_PACKET_NONCE_LEN + plain_len + CMOSH_PACKET_TAG_LEN)
+        packet_len < CMOSH_PACKET_NONCE_LEN ||
+        packet_len - CMOSH_PACKET_NONCE_LEN < CMOSH_PACKET_TAG_LEN ||
+        plain_len > packet_len - CMOSH_PACKET_NONCE_LEN -
+                    CMOSH_PACKET_TAG_LEN)
         return -1;
 
     cmosh_transport_nonce_from_seq(seq, packet);
