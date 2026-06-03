@@ -70,7 +70,7 @@ After `/compact`, do not re-read unchanged files just to rediscover prior contex
 
 Because `/compact` is used frequently, maintain continuity.
 
-Keep persistent handoff notes in `CMOSH_HANDOFF.md` at the repository root. At natural checkpoints, update that file with a compact note containing:
+Keep persistent handoff notes in `CMOSH_HANDOFF.md` at the repository root. A broader prior-conversation continuity note lives in `CMOSH_CONVERSATION_CONTEXT.md`, and the remaining implementation plan lives in `CMOSH_REMAINING_PLAN.md`. Use those as resume aids, but keep routine checkpoint updates in `CMOSH_HANDOFF.md`.
 
 * current goal
 * files touched
@@ -88,9 +88,11 @@ After `/compact`, first recover context from:
 
 1. current working tree
 2. latest `CMOSH_HANDOFF.md` handoff note
-3. existing plan
-4. `git status`
-5. small targeted diffs
+3. `CMOSH_REMAINING_PLAN.md` for remaining renderer/protocol work
+4. `CMOSH_CONVERSATION_CONTEXT.md` if broader prior-session context is needed
+5. existing plan
+6. `git status`
+7. small targeted diffs
 
 Do not re-discover the whole codebase after each compact.
 
