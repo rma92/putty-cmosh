@@ -669,6 +669,18 @@ static void test_terminal(void)
           "terminal repeats ACS character");
     cmosh_terminal_free(term);
 
+    term = cmosh_terminal_new(10, 1);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"A" "\xcc\x81" "\033[2b",
+              strlen("A" "\xcc\x81" "\033[2b")) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "A" "\xcc\x81"
+                                      "A" "\xcc\x81"
+                                      "A" "\xcc\x81"),
+          "terminal repeats combining sequence");
+    cmosh_terminal_free(term);
+
     term = cmosh_terminal_new(5, 1);
     check(cmosh_terminal_apply_bytes(
               term, (const unsigned char *)"abcd\r\033[4hX\033[4lY",

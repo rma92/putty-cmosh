@@ -492,6 +492,8 @@ static void cmosh_put_codepoint(struct cmosh_terminal *term,
             cell->len = (unsigned char)(cell->len + len);
             cell->text[cell->len] = '\0';
             cell->dirty = 1;
+            memcpy(term->last_text, cell->text, cell->len + 1);
+            term->last_len = cell->len;
         }
         return;
     }

@@ -218,6 +218,14 @@ Latest checkpoint: user reported no change: mc arrow keys still eventually inser
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after streaming host-output/dynamic server-diff changes.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed.
 * Latest `cmake --build build --target putty --config Debug` passed after streaming host-output/dynamic server-diff changes.
+
+## Latest Checkpoint
+
+* Fixed `cmosh_terminal` repeat-last-character state for combining-mark sequences: when a width-0 codepoint is appended to the current cell, `last_text`/`last_len` now track the full grapheme in that cell.
+* Added a regression test that `CSI b` repeats `A` + combining acute as the combined sequence, not just the base character.
+* Files touched: `cmosh/cmosh_terminal.c`, `cmosh/cmosh_test.c`, `AGENTS.md`.
+* Checks run: `cmake --build build --target test_cmosh --config Debug -- /m:1`, `.\build\cmosh\Debug\test_cmosh.exe`, `cmake --build build --target putty --config Debug -- /m:1`.
+* Remaining work: continue with live validation and any further renderer edge cases that show up in testing.
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after protobuf unknown-field tolerance.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after protobuf unknown-field tolerance.
 * Latest `cmake --build build --target putty --config Debug` compiled but failed to relink because `build\Debug\putty.exe` was open/locked: `LNK1168: cannot open ... putty.exe for writing`.
