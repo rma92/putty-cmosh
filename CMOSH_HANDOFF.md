@@ -6,7 +6,9 @@ Continue stabilizing native PuTTY Mosh and `cmosh`, with emphasis on UDP robustn
 
 Latest checkpoint: added alternate-screen support and common cursor/editing controls to `cmosh_terminal`. The renderer now keeps primary and alternate buffers, switches on DEC private `?1047/?1048/?1049`, and handles additional CSI/ESC controls used by full-screen apps. User confirmed the resize behavior now works.
 
-Latest user feedback: maximize/restore works, and the previously failing Lynx/emoji-heavy page now works after receive-side fragment reassembly. User asked to continue and prioritize transport hardening. User also previously reported that sometimes pressing Up for shell history just after login moves the cursor up a line.
+Latest user feedback: maximize/restore works, emojis are working, and the previously failing Lynx/emoji-heavy page now works after receive-side fragment reassembly. User asked to continue implementing as much technical renderer/protocol work as practical and report what to test. User also previously reported that sometimes pressing Up for shell history just after login moves the cursor up a line.
+
+Latest checkpoint: extended `cmosh_terminal` compatibility handling with HT/tab stops (`ESC H`, CSI `g`), DECOM origin mode `?6`, CSI `s`/`u` save/restore cursor, keypad mode no-ops, and charset-designation consumption (`ESC ( 0` etc.) so designation bytes are not rendered as text. Also tightened the insert-line reverse loop. Focused tests were added for these sequences.
 
 ## Files Recently Touched
 
@@ -312,11 +314,11 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 
 ## Known Issues
 
-* Full terminal correctness is not complete; output now goes through a native `cmosh_terminal` byte-stream parser and full redraw renderer, but alternate-screen support, broader Mosh Display/upstream parity, and dirty-region rendering are still deferred. See `CMOSH_REMAINING_PLAN.md`.
+* Full terminal correctness is not complete; output now goes through a native `cmosh_terminal` byte-stream parser and full redraw renderer with primary/alternate buffers, but broader Mosh Display/upstream parity and dirty-region rendering are still deferred. See `CMOSH_REMAINING_PLAN.md`.
 * High-latency or lossy links may still show repeated characters; throwaway handling and resize retransmission are only mitigations.
 * Sleep/wake and interface changes should now survive transient local UDP socket close/reopen failures better, but still need live Windows testing with the freshly rebuilt `build\Debug\putty.exe`.
 * Up-arrow-after-login issue still needs investigation if it persists after the UTF-8/default rebuild; likely candidates are startup tty modes or local line discipline state before UDP readiness.
 
 ## Exact Next Step
 
-Retest the freshly rebuilt `build\Debug\putty.exe` on bash prompt, colored `ls`, vim, less/man, Lynx/emoji pages, maximize/restore, startup history navigation, sleep/wake, local network loss/recovery, paste bursts, and large/fragmented screen updates. If redraw behavior is stable, next renderer work should be driven by observed parser gaps; otherwise the next planned internal improvement is closer width parity with PuTTY's Unicode tables and eventual dirty-region rendering.
+Close the running `build\Debug\putty.exe` that locked the final link step, then rebuild `cmake --build build --target putty --config Debug`. Retest bash prompt, colored `ls`, vim, less/man, Lynx/emoji pages, full-screen apps using line drawing, maximize/restore, startup history navigation, sleep/wake, local network loss/recovery, paste bursts, and large/fragmented screen updates. If redraw behavior is stable, next renderer work should be driven by observed parser gaps; otherwise the next planned internal improvement is closer width parity with PuTTY's Unicode tables and eventual dirty-region rendering.

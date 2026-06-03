@@ -564,6 +564,59 @@ static void test_terminal(void)
           "terminal insert line");
     cmosh_terminal_free(term);
 
+    term = cmosh_terminal_new(10, 1);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"a\033[4G\033H\r\tb",
+              strlen("a\033[4G\033H\r\tb")) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "a  b"),
+          "terminal tab stop set and horizontal tab");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(10, 1);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"a\033[4G\033H\033[3g\r\tb",
+              strlen("a\033[4G\033H\033[3g\r\tb")) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              !buffer_contains(out, n, "a  b") &&
+              buffer_contains(out, n, "a        b"),
+          "terminal clear all tab stops");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(10, 5);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"\033[2;4r\033[?6h\033[HX",
+              strlen("\033[2;4r\033[?6h\033[HX")) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "\033[2;1HX"),
+          "terminal origin mode cursor addressing");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(10, 1);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"ab\033[sX\033[uY",
+              strlen("ab\033[sX\033[uY")) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "abY") &&
+              !buffer_contains(out, n, "abX"),
+          "terminal CSI save and restore cursor");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(10, 1);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"\033(0lqqk",
+              strlen("\033(0lqqk")) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "lqqk") &&
+              !buffer_contains(out, n, "0lqqk"),
+          "terminal consumes charset designation");
+    cmosh_terminal_free(term);
+
     term = cmosh_terminal_new(5, 3);
     check(cmosh_terminal_apply_bytes(
               term, (const unsigned char *)"one\ntwo\nthree\nfour", 18) ==
