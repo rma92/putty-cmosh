@@ -74,8 +74,14 @@ static void test_base64(void)
           "base64 encode padded");
     check(cmosh_base64_decode("!!!!", out, sizeof(out), &n) != 0,
           "base64 rejects invalid input");
-    check(cmosh_base64_decode("TQ", out, sizeof(out), &n) != 0,
-          "base64 rejects truncated unpadded input");
+    check(cmosh_base64_decode("TQ", out, sizeof(out), &n) == 0 &&
+              n == 1 && out[0] == 'M',
+          "base64 decodes unpadded two-char tail");
+    check(cmosh_base64_decode("TWE", out, sizeof(out), &n) == 0 &&
+              n == 2 && memcmp(out, "Ma", 2) == 0,
+          "base64 decodes unpadded three-char tail");
+    check(cmosh_base64_decode("T", out, sizeof(out), &n) != 0,
+          "base64 rejects impossible unpadded tail");
     check(cmosh_base64_decode("T===", out, sizeof(out), &n) != 0,
           "base64 rejects excessive padding");
     check(cmosh_base64_decode("T=Fu", out, sizeof(out), &n) != 0,
@@ -141,6 +147,11 @@ static void test_bootstrap(void)
     check(boot.port == 60001, "parse startup port");
     check(strcmp(boot.ip, "203.0.113.9") == 0, "parse startup ip");
     check(boot.key[0] == 0 && boot.key[15] == 15, "parse startup key");
+    check(cmosh_parse_startup(
+              "MOSH CONNECT 60001 AAECAwQFBgcICQoLDA0ODw\n",
+              &boot) == 0 &&
+              boot.port == 60001 && boot.key[0] == 0 && boot.key[15] == 15,
+          "parse startup accepts unpadded mosh key");
     check(cmosh_parse_startup(
               "MOSH CONNECT 60001 AAECAwQFBgcICQoLDA0ODw==\n"
               "MOSH CONNECT 60002 AAECAwQFBgcICQoLDA0ODw==\n",
@@ -235,6 +246,52 @@ static void test_proto(void)
                   ti2.protocol_version == CMOSH_PROTOCOL_VERSION &&
                   ti2.new_num == 1 && ti2.diff_len == 1,
               "decode transport skips unknown fixed32 field");
+        memcpy(with_unknown, buf, n);
+        m = n;
+        check(cmosh_pb_put_varint(with_unknown, sizeof(with_unknown), &m,
+                                  (10U << 3) | 1) == 0,
+              "encode unknown fixed64 transport field key");
+        memset(with_unknown + m, 0x5a, 8);
+        m += 8;
+        check(cmosh_decode_transport_instruction(
+                  with_unknown, m, &ti2, NULL, NULL) == 0 &&
+                  ti2.protocol_version == CMOSH_PROTOCOL_VERSION &&
+                  ti2.new_num == 1 && ti2.diff_len == 1,
+              "decode transport skips unknown fixed64 field");
+        memcpy(with_unknown, buf, n);
+        m = n;
+        check(cmosh_pb_put_varint(with_unknown, sizeof(with_unknown), &m,
+                                  (11U << 3) | 5) == 0,
+              "encode truncated fixed32 transport field key");
+        memset(with_unknown + m, 0x33, 3);
+        m += 3;
+        check(cmosh_decode_transport_instruction(
+                  with_unknown, m, &ti2, NULL, NULL) != 0,
+              "decode transport rejects truncated fixed32 field");
+        memcpy(with_unknown, buf, n);
+        m = n;
+        check(cmosh_pb_put_varint(with_unknown, sizeof(with_unknown), &m,
+                                  (12U << 3) | 1) == 0,
+              "encode truncated fixed64 transport field key");
+        memset(with_unknown + m, 0x44, 7);
+        m += 7;
+        check(cmosh_decode_transport_instruction(
+                  with_unknown, m, &ti2, NULL, NULL) != 0,
+              "decode transport rejects truncated fixed64 field");
+        memcpy(with_unknown, buf, n);
+        m = n;
+        check(cmosh_pb_put_varint(with_unknown, sizeof(with_unknown), &m,
+                                  (13U << 3) | 2) == 0 &&
+                  cmosh_pb_put_varint(with_unknown, sizeof(with_unknown),
+                                      &m, 5) == 0,
+              "encode truncated length-delimited transport field key");
+        memset(with_unknown + m, 0x66, 2);
+        m += 2;
+        check(cmosh_decode_transport_instruction(
+                  with_unknown, m, &ti2, NULL, NULL) != 0,
+              "decode transport rejects truncated length-delimited field");
+        memcpy(with_unknown, buf, n);
+        m = n;
         with_unknown[0] = 0;
         check(cmosh_decode_transport_instruction(
                   with_unknown, m, &ti2, NULL, NULL) != 0,
@@ -349,6 +406,12 @@ static void test_fragment(void)
                             "abc\x02\x4d\x01\x27",
                             14) == 0,
           "zlib stored bytes");
+    check(cmosh_zlib_store_compress((const unsigned char *)"abc", 3,
+                                    compressed, 14, &n) == 0 && n == 14,
+          "zlib stored compress exact capacity");
+    check(cmosh_zlib_store_compress((const unsigned char *)"abc", 3,
+                                    compressed, 13, &n) != 0,
+          "zlib stored compress rejects short capacity");
     check(cmosh_zlib_store_decompress(compressed, n, decompressed,
                                       sizeof(decompressed), &fn) == 0 &&
               fn == 3 && memcmp(decompressed, "abc", 3) == 0,
@@ -369,6 +432,17 @@ static void test_fragment(void)
                                 fragment, sizeof(fragment), &fn) == 0 &&
               fragment[8] == 0x80 && fragment[9] == 0x00,
           "encode final fragment flag");
+    check(cmosh_encode_fragment(0x0102030405060708ULL, 0, 1, compressed, n,
+                                fragment, 10 + n, &fn) == 0 &&
+              fn == 10 + n,
+          "encode fragment exact capacity");
+    check(cmosh_encode_fragment(0x0102030405060708ULL, 0, 1, compressed, n,
+                                fragment, 9 + n, &fn) != 0,
+          "encode fragment rejects short capacity");
+    check(cmosh_encode_fragment(0x0102030405060708ULL, 0, 1, compressed,
+                                (size_t)-1, fragment, sizeof(fragment),
+                                &fn) != 0,
+          "encode fragment rejects oversized payload length");
 
     n = fromhex("78 9c e3 60 12 60 90 60 54 60 d4 60 30 62 b0 62 "
                 "62 61 06 00 07 67 00 f2",

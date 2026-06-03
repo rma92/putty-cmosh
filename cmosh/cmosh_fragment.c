@@ -23,7 +23,7 @@ int cmosh_zlib_store_compress(const unsigned char *in, size_t inlen,
     unsigned int sum;
 
     if ((!in && inlen) || !out || !written || inlen > 65535 ||
-        outlen < inlen + 11)
+        outlen < 11 || inlen > outlen - 11)
         return -1;
 
     out[0] = 0x78;
@@ -132,7 +132,7 @@ int cmosh_encode_fragment(uint64_t id, unsigned int index,
     int i;
 
     if ((!payload && payload_len) || !out || !written || index > 0x7fff ||
-        outlen < payload_len + 10)
+        outlen < 10 || payload_len > outlen - 10)
         return -1;
 
     for (i = 7; i >= 0; i--) {

@@ -56,8 +56,6 @@ int cmosh_base64_decode(const char *in, unsigned char *out, size_t outlen,
         return -1;
     if (pad_chars && (data_chars + pad_chars) % 4 != 0)
         return -1;
-    if (!pad_chars && data_chars % 4 != 0)
-        return -1;
 
     *written = n;
     return 0;

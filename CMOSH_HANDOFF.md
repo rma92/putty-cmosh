@@ -13,6 +13,8 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * `cmosh/cmosh_session.c`
 * `cmosh/cmosh_platform.c`
 * `cmosh/cmosh_test.c`
+* `cmosh/cmosh_base64.c`
+* `cmosh/cmosh_fragment.c`
 * `otherbackends/mosh.c`
 * `windows/window.c`
 * `AGENTS.md`
@@ -28,6 +30,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Resize updates are now recorded in the client input/retransmission queue as encoded diffs, so lost maximize/restore resize packets can be retransmitted before later input states.
 * Windows maximize/restore now uses the same terminal-resize predicate as ordinary WM_SIZE resize events: `RESIZE_TERM` or `RESIZE_EITHER` with Alt not pressed. Previously maximize/restore only called `wm_size_resize_term()` for `RESIZE_TERM`, so sessions using the default "resize either" behavior could redraw locally without sending the remote pty resize to Mosh/vim.
 * Host output decoding now has a callback/streaming API, so large unicode/full-screen server updates no longer have to fit in an 8 KiB temporary output buffer before being ACKed.
+* `MOSH CONNECT` base64 must accept valid unpadded tails. Real `mosh-server` can emit a 16-byte key as 22 base64 characters without `==`; strict padded-only decoding caused PuTTY to report `Mosh SSH bootstrap ended without MOSH CONNECT`.
 * Server diffs can now be up to 64 KiB and out-of-order queued diffs are allocated dynamically, avoiding large inline `cmosh_client` structs while still tolerating larger compressed server updates.
 * Host protobuf decoding now skips unknown varint, length-delimited, fixed32, and fixed64 fields instead of dropping the whole server update. This avoids treating richer display/emoji-related fields as bad packets.
 * PuTTY Mosh logs a one-shot Event Log diagnostic if a server update decodes successfully but contains no raw host-output bytes, which is a strong signal that the current raw-output shim needs the real terminal-state renderer for that screen.
@@ -119,8 +122,10 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Standalone `cmosh` resize attempts that cannot be packetized because the retransmission queue is full are deferred by leaving `last_cols`/`last_rows` unchanged; the resize will be retried after input ACKs free queue space.
 * Client init now only seeds receive replay history from a server nonce-space initial packet. Startup paths should reject authenticated first UDP packets that do not advance server state.
 * PuTTY Mosh caps pre-`MOSH CONNECT` bootstrap output at 64 KiB with overflow-safe accounting; the bootstrap parser only needs the startup lines, so unbounded stderr/stdout is treated as fatal.
-* Base64 bootstrap key decoding now rejects truncated unpadded input, excessive padding, and data after padding. Mosh server keys should be canonical padded base64.
+* Base64 bootstrap key decoding accepts valid unpadded tails because `mosh-server` can emit unpadded session keys. It still rejects impossible one-character tails, excessive padding, and data after padding.
 * Protobuf varint decoding rejects uint64 overflow, transport instructions reject field 0, and unknown fixed32/fixed64 transport fields are skipped instead of dropping otherwise valid packets.
+* Unknown protobuf fields with valid fixed32/fixed64/length-delimited wire data can be skipped, but truncated fixed-width or length-delimited unknown fields remain malformed.
+* Fragment/zlib encoder capacity checks must be subtraction-based (`payload_len > outlen - header`) so invalid caller lengths cannot wrap addition-based checks.
 * Host-output protobuf decoding also rejects field 0, while still skipping unknown valid wire types. Output copy and protobuf buffer helpers use subtraction-based bounds checks to avoid size_t wraparound.
 * Input/resize packet constructors now refuse to enqueue when the local input state is already `UINT64_MAX`, preventing client-state wraparound in encoded packets.
 * Standalone `cmosh` ignores optional post-start-ACK packets that do not advance server state and falls back to the first authenticated server state.
@@ -249,6 +254,11 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after host-output field-zero rejection, overflow-safe bounds checks, duplicate-connect rejection, and input-state wrap prevention.
 * Latest `cmake --build build --target cmosh --config Debug` passed after host-output field-zero rejection, overflow-safe bounds checks, duplicate-connect rejection, and input-state wrap prevention.
 * Latest `cmake --build build --target putty --config Debug` passed after host-output field-zero rejection, overflow-safe bounds checks, duplicate-connect rejection, and input-state wrap prevention.
+* Latest `cmake --build build --target test_cmosh --config Debug` passed after fixing unpadded `MOSH CONNECT` base64 acceptance and adding malformed unknown-field/bounds regression tests.
+* Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after fixing unpadded `MOSH CONNECT` base64 acceptance and adding malformed unknown-field/bounds regression tests.
+* Latest `cmake --build build --target cmosh --config Debug` passed after fixing unpadded `MOSH CONNECT` base64 acceptance and adding malformed unknown-field/bounds regression tests.
+* Latest `cmake --build build --target putty --config Debug` passed after fixing unpadded `MOSH CONNECT` base64 acceptance and adding malformed unknown-field/bounds regression tests.
+* Latest `git diff --check` passed with only expected CRLF conversion warnings.
 
 ## Known Issues
 
@@ -259,4 +269,4 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 
 ## Exact Next Step
 
-Retest the freshly rebuilt `build\Debug\putty.exe` on a high-latency/lossy connection. Focus sleep/wake, local network loss/recovery, paste bursts, startup UDP establishment, rapid command-history navigation immediately after login, rapid resize/maximize/restore under load, and any large/fragmented screen updates. Watch for the throttled `Mosh UDP send failed locally...` Event Log line, especially around first UDP association/start ACK. If repeated characters persist, compare Event Log retransmit lines against the `Mosh server input ACK ...` lines to see whether repeats occur before the server ACK/throwaway transition or after already-trimmed input state.
+Retest the freshly rebuilt `build\Debug\putty.exe` startup path first; this checkpoint fixed a regression where strict base64 parsing caused `Mosh SSH bootstrap ended without MOSH CONNECT` for unpadded server keys. Then continue lossy-link testing: sleep/wake, local network loss/recovery, paste bursts, rapid command-history navigation immediately after login, resize/maximize/restore under load, and large/fragmented screen updates. Watch for throttled UDP send and input ACK/throwaway Event Log lines to correlate any repeated-character reports.
