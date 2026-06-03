@@ -17,6 +17,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * `cmosh/cmosh_fragment.c`
 * `cmosh/cmosh_ocb.c`
 * `cmosh/cmosh_transport.c`
+* `CMOSH_REMAINING_PLAN.md`
 * `otherbackends/mosh.c`
 * `windows/window.c`
 * `AGENTS.md`
@@ -130,6 +131,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * Unknown protobuf fields with valid fixed32/fixed64/length-delimited wire data can be skipped, but truncated fixed-width or length-delimited unknown fields remain malformed.
 * Fragment/zlib encoder capacity checks must be subtraction-based (`payload_len > outlen - header`) so invalid caller lengths cannot wrap addition-based checks.
 * OCB and transport packet encryption capacity checks must be subtraction-based before pointer arithmetic or encryption loops run. Oversized caller lengths must fail immediately.
+* `CMOSH_REMAINING_PLAN.md` now captures the remaining protocol validation tasks and terminal-state renderer implementation plan. Protocol hardening is mostly complete unless live testing exposes a specific new state-machine failure.
 * Host-output protobuf decoding also rejects field 0, while still skipping unknown valid wire types. Output copy and protobuf buffer helpers use subtraction-based bounds checks to avoid size_t wraparound.
 * Input/resize packet constructors now refuse to enqueue when the local input state is already `UINT64_MAX`, preventing client-state wraparound in encoded packets.
 * Standalone `cmosh` ignores optional post-start-ACK packets that do not advance server state and falls back to the first authenticated server state.
@@ -271,7 +273,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 
 ## Known Issues
 
-* Full terminal correctness is not complete; output still depends on raw host-output decoding instead of a full Mosh terminal-state model.
+* Full terminal correctness is not complete; output still depends on raw host-output decoding instead of a full Mosh terminal-state model. See `CMOSH_REMAINING_PLAN.md`.
 * High-latency or lossy links may still show repeated characters; throwaway handling and resize retransmission are only mitigations.
 * Sleep/wake and interface changes should now survive transient local UDP socket close/reopen failures better, but still need live Windows testing with the freshly rebuilt `build\Debug\putty.exe`.
 * Up-arrow-after-login issue still needs investigation if it persists after the UTF-8/default rebuild; likely candidates are startup tty modes or local line discipline state before UDP readiness.
