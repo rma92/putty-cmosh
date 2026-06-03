@@ -750,7 +750,8 @@ int cmosh_terminal_render_full(struct cmosh_terminal *term,
                                cmosh_terminal_output_fn output, void *ctx)
 {
     unsigned int r, c;
-    struct cmosh_attr current = cmosh_default_attr();
+    struct cmosh_attr default_attr = cmosh_default_attr();
+    struct cmosh_attr current = default_attr;
 
     if (!term || !output)
         return -1;
@@ -783,6 +784,11 @@ int cmosh_terminal_render_full(struct cmosh_terminal *term,
             } else if (cmosh_out(output, ctx, " ") != 0) {
                 return -1;
             }
+        }
+        if (!cmosh_attr_equal(&current, &default_attr)) {
+            if (cmosh_out(output, ctx, "\033[0m") != 0)
+                return -1;
+            current = default_attr;
         }
         if (cmosh_out(output, ctx, "\033[K") != 0)
             return -1;

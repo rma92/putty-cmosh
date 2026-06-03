@@ -4,7 +4,7 @@
 
 Continue stabilizing native PuTTY Mosh and `cmosh`, with emphasis on UDP robustness, input retransmission correctness, terminal redraw behavior, and eventual replacement of raw host-output rendering with a real terminal-state model.
 
-Latest checkpoint: first native `cmosh_terminal` screen-buffer milestone is implemented and wired into standalone `cmosh` and PuTTY Mosh. Host diffs are now walked in instruction order for HostBytes, ResizeMessage, and EchoAck; visible HostBytes/resize updates apply to the terminal model and emit deterministic full-screen redraw bytes. EchoAck-only/state-only updates are accepted without requiring a redraw.
+Latest checkpoint: fixed two first-renderer follow-ups. Full redraw now resets SGR before row-tail `ESC[K` so a colored cell does not make clear-to-EOL paint the rest of the screen in that color. PuTTY resize coalescing now caps an existing pending resize's local pending-input barrier to the current pending-input length, avoiding stale delay while preserving the original ordering point.
 
 Latest user feedback: maximize/restore works, and the previously failing Lynx/emoji-heavy page now works after receive-side fragment reassembly. User asked to continue and prioritize transport hardening. User also previously reported that sometimes pressing Up for shell history just after login moves the cursor up a line.
 
@@ -135,6 +135,7 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * PuTTY `Mosh` owns a `struct cmosh_terminal *terminal`, initialised at 80x24 and resized on backend size events and decoded host resize instructions.
 * Standalone `cmosh` owns the same terminal model and renders through the same host apply path for parity.
 * Focused tests were added in `cmosh_test.c` for text/cursor, overwrite + EL, SGR, LF scroll, UTF-8 wide smoke, resize-before-hostbytes ordering, EchoAck-only apply, and incomplete CSI tolerance.
+* Follow-up regression test covers colored text followed by row-tail clear: renderer must emit `ESC[0m` before `ESC[K` so colors do not bleed to the end of the screen during full redraw.
 
 ## Commands Run For Latest Checkpoint
 
@@ -143,6 +144,11 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * `cmake --build build --target cmosh --config Debug` - passed, with existing MSBuild manifest warning.
 * `cmake --build build --target putty --config Debug` - passed, with existing MSBuild manifest warning.
 * `git diff --check` - passed; Git reported only existing LF-to-CRLF working-copy warnings.
+* Follow-up: `cmake --build build --target test_cmosh --config Debug` - passed, with existing MSBuild manifest warning.
+* Follow-up: `.\build\cmosh\Debug\test_cmosh.exe` - passed.
+* Follow-up: `cmake --build build --target cmosh --config Debug` - passed, with existing MSBuild manifest warning.
+* Follow-up: `cmake --build build --target putty --config Debug` - compile reached link, but failed with `LNK1168` because `build\Debug\putty.exe` was running and locked for writing by PID 3376.
+* Follow-up: `git diff --check` - passed; Git reported only existing LF-to-CRLF working-copy warnings.
 
 * Decoded transport instructions must match `CMOSH_PROTOCOL_VERSION` before client state, ACK trimming, or host output can be affected.
 * No-diff server-state transitions still advance state and commit retained ACK/throwaway metadata. Stale no-diff transitions must not advance server state, though their authenticated ACK/throwaway fields may still trim input after high-level validation.

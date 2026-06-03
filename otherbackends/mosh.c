@@ -1197,6 +1197,9 @@ static void mosh_size(Backend *be, int width, int height)
     if (!mosh->pending_resize) {
         mosh->pending_resize = true;
         mosh->pending_resize_after_input_len = mosh->pending_input->len;
+    } else if (mosh->pending_resize_after_input_len >
+               mosh->pending_input->len) {
+        mosh->pending_resize_after_input_len = mosh->pending_input->len;
     }
 
     if (!mosh->udp_ready || mosh->shutdown)

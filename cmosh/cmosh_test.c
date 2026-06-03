@@ -531,6 +531,15 @@ static void test_terminal(void)
           "terminal SGR colors and reset");
     cmosh_terminal_free(term);
 
+    term = cmosh_terminal_new(10, 3);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"\033[44mblue", 9) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "blue\033[0m\033[K"),
+          "terminal resets attributes before clearing row tail");
+    cmosh_terminal_free(term);
+
     term = cmosh_terminal_new(5, 3);
     check(cmosh_terminal_apply_bytes(
               term, (const unsigned char *)"one\ntwo\nthree\nfour", 18) ==
