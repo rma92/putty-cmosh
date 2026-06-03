@@ -6,6 +6,12 @@ We are in the middle of implementing a complex new protocol feature in PuTTY.
 
 A plan already exists. Do not restart planning from scratch unless explicitly asked. Preserve the current implementation direction, infer intent from existing changes, and continue from the current working tree state.
 
+## Model usage
+
+If the active coding client lets you choose models, prefer the smallest model that can handle the current step cleanly. Use a mini model for narrow reads, small edits, focused tests, and routine handoff updates. Escalate to `gpt-5.5` only when the task clearly needs deeper cross-file reasoning, protocol design judgment, or debugging that is not staying local.
+
+If the client does not expose model selection, or uses a different model naming scheme such as Claude Code, ignore this section and continue with the client defaults. Do not add client-specific instructions that would make the file incompatible with other tools.
+
 ## Operating style
 
 * Prefer small, localized changes.
