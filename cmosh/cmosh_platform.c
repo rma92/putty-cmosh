@@ -3,6 +3,7 @@
 #include "cmosh_client.h"
 #include "cmosh_proto.h"
 #include "cmosh_session.h"
+#include "cmosh_terminal.h"
 #include "cmosh_transport.h"
 
 #include <stdio.h>
@@ -172,6 +173,11 @@ struct cmosh_render_ctx {
     int wrote;
 };
 
+struct cmosh_terminal_apply_ctx {
+    struct cmosh_terminal *terminal;
+    int visible;
+};
+
 static int cmosh_render_host_output(void *vctx, const unsigned char *data,
                                     size_t len)
 {
@@ -187,12 +193,37 @@ static int cmosh_render_host_output(void *vctx, const unsigned char *data,
     return 0;
 }
 
+static int cmosh_terminal_hostbytes(void *vctx, const unsigned char *data,
+                                    size_t len)
+{
+    struct cmosh_terminal_apply_ctx *ctx =
+        (struct cmosh_terminal_apply_ctx *)vctx;
+
+    if (len)
+        ctx->visible = 1;
+    return cmosh_terminal_apply_bytes(ctx->terminal, data, len);
+}
+
+static int cmosh_terminal_resize_output(void *vctx, unsigned int cols,
+                                        unsigned int rows)
+{
+    struct cmosh_terminal_apply_ctx *ctx =
+        (struct cmosh_terminal_apply_ctx *)vctx;
+
+    ctx->visible = 1;
+    return cmosh_terminal_resize(ctx->terminal, cols, rows);
+}
+
 static int cmosh_decode_and_render_host(const unsigned char *diff,
                                         size_t diff_len,
                                         unsigned char *host_output,
-                                        size_t host_output_len, int verbose)
+                                        size_t host_output_len,
+                                        struct cmosh_terminal *terminal,
+                                        int verbose)
 {
     struct cmosh_render_ctx ctx;
+    struct cmosh_terminal_apply_ctx apply_ctx;
+    struct cmosh_host_apply apply;
 
     (void)host_output;
     (void)host_output_len;
@@ -203,8 +234,17 @@ static int cmosh_decode_and_render_host(const unsigned char *diff,
         cmosh_dump_hex(stderr, "loop host diff", diff, diff_len);
     ctx.verbose = verbose;
     ctx.wrote = 0;
-    if (cmosh_decode_host_output_cb(diff, diff_len, cmosh_render_host_output,
-                                    &ctx) != 0)
+    apply_ctx.terminal = terminal;
+    apply_ctx.visible = 0;
+    memset(&apply, 0, sizeof(apply));
+    apply.hostbytes = cmosh_terminal_hostbytes;
+    apply.resize = cmosh_terminal_resize_output;
+    apply.ctx = &apply_ctx;
+    if (cmosh_decode_host_apply(diff, diff_len, &apply) != 0)
+        return -1;
+    if (apply_ctx.visible &&
+        cmosh_terminal_render_full(terminal, cmosh_render_host_output,
+                                   &ctx) != 0)
         return -1;
     if (!ctx.wrote && verbose) {
         cmosh_dump_hex(stderr, "undecoded loop host diff", diff, diff_len);
@@ -364,6 +404,7 @@ static int cmosh_contains_exit_key(const unsigned char *buf, size_t len)
 struct cmosh_host_output_ctx {
     unsigned char *host_output;
     size_t host_output_len;
+    struct cmosh_terminal *terminal;
     int verbose;
 };
 
@@ -374,7 +415,8 @@ static int cmosh_host_output_callback(void *vctx, const unsigned char *diff,
         (struct cmosh_host_output_ctx *)vctx;
 
     return cmosh_decode_and_render_host(diff, diff_len, ctx->host_output,
-                                        ctx->host_output_len, ctx->verbose);
+                                        ctx->host_output_len, ctx->terminal,
+                                        ctx->verbose);
 }
 
 static int append_raw(char *buf, size_t buflen, size_t *pos, const char *s)
@@ -536,6 +578,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
     struct cmosh_transport_instruction ti;
     unsigned int initial_ts = 0, initial_echo_ts = 0;
     unsigned int cols = 80, rows = 24;
+    struct cmosh_terminal *terminal = NULL;
     int rc = -1;
     int console_started = 0;
     fd_set rfds;
@@ -554,6 +597,9 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
     console_started = 1;
 
     cmosh_console_size(&cols, &rows);
+    terminal = cmosh_terminal_new(cols, rows);
+    if (!terminal)
+        goto out_socket;
     if (cmosh_client_make_initial_packet(key, cols, rows, cmosh_now16_ms(),
                                          packet, sizeof(packet), &packet_len,
                                          &diff_len) != 0)
@@ -696,7 +742,8 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
         if (!verbose)
             cmosh_terminal_session_start();
         if (cmosh_decode_and_render_host(ti.diff, ti.diff_len, host_output,
-                                         sizeof(host_output), verbose) != 0)
+                                         sizeof(host_output), terminal,
+                                         verbose) != 0)
             goto out_socket;
         {
             struct cmosh_client client;
@@ -734,6 +781,9 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                             now_ms);
                                     last_cols = cur_cols;
                                     last_rows = cur_rows;
+                                    if (cmosh_terminal_resize(
+                                            terminal, cur_cols, cur_rows) != 0)
+                                        goto out_socket;
                                     sent = 1;
                                     if (verbose)
                                         fprintf(stderr,
@@ -835,6 +885,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
                                     output_ctx.host_output = host_output;
                                     output_ctx.host_output_len =
                                         sizeof(host_output);
+                                    output_ctx.terminal = terminal;
                                     output_ctx.verbose = verbose;
 
                                     if (cmosh_client_process_packet(
@@ -1022,6 +1073,7 @@ int cmosh_udp_probe_encrypted(const char *host, unsigned short port, int ipv4,
     rc = 0;
 
 out_socket:
+    cmosh_terminal_free(terminal);
     if (console_started) {
         cmosh_terminal_soft_reset();
         cmosh_console_restore();

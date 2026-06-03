@@ -6,6 +6,7 @@
 #include "cmosh_ocb.h"
 #include "cmosh_proto.h"
 #include "cmosh_session.h"
+#include "cmosh_terminal.h"
 #include "cmosh_transport.h"
 
 #include <stdio.h>
@@ -57,6 +58,36 @@ static size_t fromhex(const char *hex, unsigned char *out, size_t outlen)
         out[n++] = (unsigned char)((hi << 4) | lo);
     }
     return n;
+}
+
+static int test_put_bytes(unsigned char *buf, size_t buflen, size_t *pos,
+                          unsigned int field, const unsigned char *data,
+                          size_t data_len)
+{
+    if (cmosh_pb_put_varint(buf, buflen, pos,
+                            ((uint64_t)field << 3) | 2) != 0 ||
+        cmosh_pb_put_varint(buf, buflen, pos, data_len) != 0)
+        return -1;
+    if (*pos > buflen || data_len > buflen - *pos)
+        return -1;
+    if (data_len)
+        memcpy(buf + *pos, data, data_len);
+    *pos += data_len;
+    return 0;
+}
+
+static int buffer_contains(const unsigned char *buf, size_t len,
+                           const char *needle)
+{
+    size_t needle_len = strlen(needle);
+    size_t i;
+
+    if (needle_len > len)
+        return 0;
+    for (i = 0; i <= len - needle_len; i++)
+        if (memcmp(buf + i, needle, needle_len) == 0)
+            return 1;
+    return 0;
 }
 
 static void test_base64(void)
@@ -458,6 +489,121 @@ static void test_fragment(void)
                      "\x3a\x02\x04\x03",
                      16) == 0,
           "zlib dynamic server payload decompress");
+}
+
+static void test_terminal(void)
+{
+    unsigned char out[8192], top[128], instruction[96], resize[16], host[64];
+    size_t n = 0, tpos, ipos, rpos, hpos;
+    struct cmosh_terminal *term;
+    struct cmosh_host_apply apply;
+
+    term = cmosh_terminal_new(10, 3);
+    check(term != NULL, "terminal alloc");
+    check(cmosh_terminal_apply_bytes(term, (const unsigned char *)"hi", 2) ==
+              0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "hi") &&
+              buffer_contains(out, n, "\033[1;3H"),
+          "terminal simple prompt and cursor");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(10, 3);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"abcdef\rXY\033[K", 10) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "XY") &&
+              !buffer_contains(out, n, "abcdef"),
+          "terminal overwrite and clear to end line");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(10, 3);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"\033[31;1mR\033[0mN", 13) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "\033[31m") &&
+              buffer_contains(out, n, "\033[1m") &&
+              buffer_contains(out, n, "R") &&
+              buffer_contains(out, n, "N"),
+          "terminal SGR colors and reset");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(5, 3);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"one\ntwo\nthree\nfour", 18) ==
+              0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              !buffer_contains(out, n, "one") &&
+              buffer_contains(out, n, "four"),
+          "terminal LF scrolling");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(8, 2);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"A\xe2\x98\x83\xf0\x9f\x98\x80",
+              8) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "A\xe2\x98\x83\xf0\x9f\x98\x80"),
+          "terminal UTF-8 wide smoke");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(3, 1);
+    memset(&apply, 0, sizeof(apply));
+    apply.hostbytes = (cmosh_host_bytes_fn)cmosh_terminal_apply_bytes;
+    apply.resize = (cmosh_host_resize_fn)cmosh_terminal_resize;
+    apply.ctx = term;
+    rpos = 0;
+    check(cmosh_pb_put_varint(resize, sizeof(resize), &rpos,
+                              (5U << 3) | 0) == 0 &&
+              cmosh_pb_put_varint(resize, sizeof(resize), &rpos, 5) == 0 &&
+              cmosh_pb_put_varint(resize, sizeof(resize), &rpos,
+                                  (6U << 3) | 0) == 0 &&
+              cmosh_pb_put_varint(resize, sizeof(resize), &rpos, 1) == 0,
+          "terminal encode host resize");
+    hpos = 0;
+    check(test_put_bytes(host, sizeof(host), &hpos, 4,
+                         (const unsigned char *)"abcde", 5) == 0,
+          "terminal encode host bytes");
+    ipos = 0;
+    check(test_put_bytes(instruction, sizeof(instruction), &ipos, 3, resize,
+                         rpos) == 0 &&
+              test_put_bytes(instruction, sizeof(instruction), &ipos, 2, host,
+                             hpos) == 0,
+          "terminal encode ordered host instruction");
+    tpos = 0;
+    check(test_put_bytes(top, sizeof(top), &tpos, 1, instruction, ipos) == 0,
+          "terminal encode ordered host message");
+    check(cmosh_decode_host_apply(top, tpos, &apply) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "abcde"),
+          "host resize before hostbytes applies in order");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(5, 1);
+    memset(&apply, 0, sizeof(apply));
+    apply.hostbytes = (cmosh_host_bytes_fn)cmosh_terminal_apply_bytes;
+    apply.resize = (cmosh_host_resize_fn)cmosh_terminal_resize;
+    apply.ctx = term;
+    check(cmosh_decode_host_apply((const unsigned char *)"\x0a\x04\x3a\x02"
+                                  "\x40\x7b",
+                                  6, &apply) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              !buffer_contains(out, n, "{"),
+          "host echoack only produces no cell text");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(5, 1);
+    check(cmosh_terminal_apply_bytes(term, (const unsigned char *)"\033[",
+                                     2) == 0,
+          "terminal accepts incomplete CSI without corruption");
+    cmosh_terminal_free(term);
 }
 
 static void test_transport(void)
@@ -1760,6 +1906,7 @@ int main(void)
     test_aes_ocb();
     test_bootstrap();
     test_proto();
+    test_terminal();
     test_fragment();
     test_transport();
     test_session();

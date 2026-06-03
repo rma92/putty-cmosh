@@ -26,6 +26,18 @@ struct cmosh_transport_instruction {
 
 typedef int (*cmosh_host_output_fn)(void *ctx, const unsigned char *data,
                                     size_t len);
+typedef int (*cmosh_host_bytes_fn)(void *ctx, const unsigned char *data,
+                                   size_t len);
+typedef int (*cmosh_host_resize_fn)(void *ctx, unsigned int cols,
+                                    unsigned int rows);
+typedef int (*cmosh_host_echoack_fn)(void *ctx, uint64_t frame_id);
+
+struct cmosh_host_apply {
+    cmosh_host_bytes_fn hostbytes;
+    cmosh_host_resize_fn resize;
+    cmosh_host_echoack_fn echoack;
+    void *ctx;
+};
 
 size_t cmosh_pb_varint_size(uint64_t value);
 int cmosh_pb_put_varint(unsigned char *buf, size_t buflen, size_t *pos,
@@ -53,5 +65,7 @@ int cmosh_decode_host_output(const unsigned char *buf, size_t buflen,
                              size_t *written);
 int cmosh_decode_host_output_cb(const unsigned char *buf, size_t buflen,
                                 cmosh_host_output_fn output, void *ctx);
+int cmosh_decode_host_apply(const unsigned char *buf, size_t buflen,
+                            const struct cmosh_host_apply *apply);
 
 #endif

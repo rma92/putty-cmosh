@@ -4,12 +4,16 @@
 
 Continue stabilizing native PuTTY Mosh and `cmosh`, with emphasis on UDP robustness, input retransmission correctness, terminal redraw behavior, and eventual replacement of raw host-output rendering with a real terminal-state model.
 
+Latest checkpoint: first native `cmosh_terminal` screen-buffer milestone is implemented and wired into standalone `cmosh` and PuTTY Mosh. Host diffs are now walked in instruction order for HostBytes, ResizeMessage, and EchoAck; visible HostBytes/resize updates apply to the terminal model and emit deterministic full-screen redraw bytes. EchoAck-only/state-only updates are accepted without requiring a redraw.
+
 Latest user feedback: maximize/restore works, and the previously failing Lynx/emoji-heavy page now works after receive-side fragment reassembly. User asked to continue and prioritize transport hardening. User also previously reported that sometimes pressing Up for shell history just after login moves the cursor up a line.
 
 ## Files Recently Touched
 
 * `cmosh/cmosh_client.c`
 * `cmosh/cmosh_client.h`
+* `cmosh/cmosh_terminal.c`
+* `cmosh/cmosh_terminal.h`
 * `cmosh/cmosh_session.c`
 * `cmosh/cmosh_platform.c`
 * `cmosh/cmosh_test.c`
@@ -118,6 +122,28 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 * When the bounded server-diff queue is full, preserve the closest recoverable state transitions. A nearer incoming diff may evict the farthest future diff, while a too-far future diff is dropped instead of displacing closer recovery state.
 * Far-future server transitions outside `CMOSH_CLIENT_SERVER_FUTURE_WINDOW` must not enter the future-diff queue. They may still carry authenticated input ACK/throwaway information after high-level validation.
 * Remote shutdown is a committed server-state transition. Stale or ignored packets with `new_num == UINT64_MAX` must not notify remote exit unless the state machine actually advances to `CMOSH_CLIENT_SERVER_SHUTDOWN_STATE`.
+* HostMessage instruction order matters: a ResizeMessage in a host diff must resize the terminal model before later HostBytes in the same HostMessage are parsed.
+* EchoAck is non-visible metadata for this milestone. Accept it, but do not force a full redraw unless the same accepted host diff also contains HostBytes or resize.
+
+## Latest Renderer Checkpoint
+
+* Added `cmosh_terminal_new/free/resize/apply_bytes/render_full/render_full_to_buffer`.
+* Parser scope now covers printable UTF-8, CR/LF/BS/BEL, ESC save/restore cursor, CSI `H/f/A/B/C/D/J/K/X/m/r`, DEC private `?25`, `?5`, `?7`, and OSC consumption through BEL/ST.
+* Screen model stores fixed-size cells with UTF-8 text, width, dirty flag, current SGR attributes, cursor position/visibility, scroll region, wrap mode, and pending wrap.
+* Full redraw emits hide cursor, reset attributes, clear/home, all visible row text with conservative SGR changes, clear-to-EOL per row, then restores cursor and cursor visibility.
+* `cmosh_decode_host_apply` now preserves existing malformed-field rejection and unknown-valid-field skipping while adding ordered callbacks for HostBytes field 2, ResizeMessage field 3, and EchoAck field 7 from upstream `mosh/src/protobufs/hostinput.proto`.
+* PuTTY `Mosh` owns a `struct cmosh_terminal *terminal`, initialised at 80x24 and resized on backend size events and decoded host resize instructions.
+* Standalone `cmosh` owns the same terminal model and renders through the same host apply path for parity.
+* Focused tests were added in `cmosh_test.c` for text/cursor, overwrite + EL, SGR, LF scroll, UTF-8 wide smoke, resize-before-hostbytes ordering, EchoAck-only apply, and incomplete CSI tolerance.
+
+## Commands Run For Latest Checkpoint
+
+* `cmake --build build --target test_cmosh --config Debug` - passed, with existing MSBuild manifest warning.
+* `.\build\cmosh\Debug\test_cmosh.exe` - passed.
+* `cmake --build build --target cmosh --config Debug` - passed, with existing MSBuild manifest warning.
+* `cmake --build build --target putty --config Debug` - passed, with existing MSBuild manifest warning.
+* `git diff --check` - passed; Git reported only existing LF-to-CRLF working-copy warnings.
+
 * Decoded transport instructions must match `CMOSH_PROTOCOL_VERSION` before client state, ACK trimming, or host output can be affected.
 * No-diff server-state transitions still advance state and commit retained ACK/throwaway metadata. Stale no-diff transitions must not advance server state, though their authenticated ACK/throwaway fields may still trim input after high-level validation.
 * Duplicate packet recovery must be able to apply queued no-diff transitions without requiring a host-output callback; requiring output would leave ACK-only metadata stuck behind duplicate replay.
@@ -273,11 +299,11 @@ Latest user feedback: maximize/restore works, and the previously failing Lynx/em
 
 ## Known Issues
 
-* Full terminal correctness is not complete; output still depends on raw host-output decoding instead of a full Mosh terminal-state model. See `CMOSH_REMAINING_PLAN.md`.
+* Full terminal correctness is not complete; output now goes through a native `cmosh_terminal` byte-stream parser and full redraw renderer, but alternate-screen support, broader Mosh Display/upstream parity, and dirty-region rendering are still deferred. See `CMOSH_REMAINING_PLAN.md`.
 * High-latency or lossy links may still show repeated characters; throwaway handling and resize retransmission are only mitigations.
 * Sleep/wake and interface changes should now survive transient local UDP socket close/reopen failures better, but still need live Windows testing with the freshly rebuilt `build\Debug\putty.exe`.
 * Up-arrow-after-login issue still needs investigation if it persists after the UTF-8/default rebuild; likely candidates are startup tty modes or local line discipline state before UDP readiness.
 
 ## Exact Next Step
 
-Retest the freshly rebuilt `build\Debug\putty.exe` on startup and lossy-link paths: sleep/wake, local network loss/recovery, paste bursts, rapid command-history navigation immediately after login, resize/maximize/restore under load, and large/fragmented screen updates. Watch for throttled UDP send and input ACK/throwaway Event Log lines to correlate any repeated-character reports. Protocol hardening is now mostly down to live validation and any bugs surfaced by that testing; remaining major implementation gap is still the full Mosh terminal-state renderer.
+Retest the freshly rebuilt `build\Debug\putty.exe` on bash prompt, colored `ls`, vim, Lynx/emoji pages, maximize/restore, startup history navigation, sleep/wake, local network loss/recovery, paste bursts, and large/fragmented screen updates. If redraw behavior is stable, the next renderer work is alternate-screen support and broader Display/upstream parity; if live tests show parser gaps, add the smallest CSI/OSC support and focused tests first.

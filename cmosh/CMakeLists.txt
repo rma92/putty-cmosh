@@ -7,6 +7,7 @@ set(CMOSH_CORE_SOURCES
   cmosh_ocb.c
   cmosh_proto.c
   cmosh_session.c
+  cmosh_terminal.c
   cmosh_transport.c)
 
 add_library(cmosh_core_embedded STATIC

@@ -10,6 +10,7 @@
 #include "cmosh_bootstrap.h"
 #include "cmosh_client.h"
 #include "cmosh_proto.h"
+#include "cmosh_terminal.h"
 #include "cmosh_transport.h"
 
 #include <stdio.h>
@@ -35,6 +36,7 @@ struct Mosh {
     Backend *ssh_backend;
     Socket *udp_socket;
     struct cmosh_client client;
+    struct cmosh_terminal *terminal;
     struct cmosh_transport_state bootstrap_transport;
     unsigned char initial_packet[CMOSH_MAX_PACKET];
     size_t initial_packet_len;
@@ -200,6 +202,11 @@ struct mosh_output_ctx {
     bool wrote;
 };
 
+struct mosh_terminal_apply_ctx {
+    struct cmosh_terminal *terminal;
+    bool visible;
+};
+
 static int mosh_seat_output(void *vctx, const unsigned char *data, size_t len)
 {
     struct mosh_output_ctx *ctx = (struct mosh_output_ctx *)vctx;
@@ -211,19 +218,50 @@ static int mosh_seat_output(void *vctx, const unsigned char *data, size_t len)
     return 0;
 }
 
+static int mosh_terminal_hostbytes(void *vctx, const unsigned char *data,
+                                   size_t len)
+{
+    struct mosh_terminal_apply_ctx *ctx =
+        (struct mosh_terminal_apply_ctx *)vctx;
+
+    if (len)
+        ctx->visible = true;
+    return cmosh_terminal_apply_bytes(ctx->terminal, data, len);
+}
+
+static int mosh_terminal_resize(void *vctx, unsigned int cols,
+                                unsigned int rows)
+{
+    struct mosh_terminal_apply_ctx *ctx =
+        (struct mosh_terminal_apply_ctx *)vctx;
+
+    ctx->visible = true;
+    return cmosh_terminal_resize(ctx->terminal, cols, rows);
+}
+
 static int mosh_host_output(void *vctx, const unsigned char *diff,
                             size_t diff_len)
 {
     Mosh *mosh = (Mosh *)vctx;
     struct mosh_output_ctx ctx;
+    struct mosh_terminal_apply_ctx apply_ctx;
+    struct cmosh_host_apply apply;
     int ret;
 
     if (!diff_len)
         return 0;
     ctx.mosh = mosh;
     ctx.wrote = false;
-    ret = cmosh_decode_host_output_cb(diff, diff_len, mosh_seat_output,
-                                      &ctx);
+    apply_ctx.terminal = mosh->terminal;
+    apply_ctx.visible = false;
+    memset(&apply, 0, sizeof(apply));
+    apply.hostbytes = mosh_terminal_hostbytes;
+    apply.resize = mosh_terminal_resize;
+    apply.ctx = &apply_ctx;
+    ret = cmosh_decode_host_apply(diff, diff_len, &apply);
+    if (ret == 0 && apply_ctx.visible)
+        ret = cmosh_terminal_render_full(mosh->terminal, mosh_seat_output,
+                                         &ctx);
     if (ret == 0 && !ctx.wrote && !mosh->logged_state_only_output) {
         logevent(mosh->logctx,
                  "Mosh server update contained no raw host-output bytes; "
@@ -959,6 +997,11 @@ static char *mosh_init(const BackendVtable *vt, Seat *seat,
     mosh->pending_input = strbuf_new();
     mosh->cols = 80;
     mosh->rows = 24;
+    mosh->terminal = cmosh_terminal_new(mosh->cols, mosh->rows);
+    if (!mosh->terminal) {
+        mosh_free(&mosh->backend);
+        return dupstr("Mosh terminal renderer could not be initialised");
+    }
     mosh->exitcode = INT_MAX;
 
     mosh->bootstrap_command = mosh_build_remote_command("mosh-server",
@@ -997,6 +1040,7 @@ static void mosh_free(Backend *be)
     cmosh_transport_clear(&mosh->bootstrap_transport);
     cmosh_transport_clear(&mosh->client.recv_transport);
     cmosh_server_queue_clear(&mosh->client.server_queue);
+    cmosh_terminal_free(mosh->terminal);
     if (mosh->ssh_backend)
         backend_free(mosh->ssh_backend);
     if (mosh->bootstrap_output)
@@ -1147,6 +1191,8 @@ static void mosh_size(Backend *be, int width, int height)
 
     mosh->cols = width > 0 ? (unsigned int)width : 80;
     mosh->rows = height > 0 ? (unsigned int)height : 24;
+    if (mosh->terminal)
+        cmosh_terminal_resize(mosh->terminal, mosh->cols, mosh->rows);
 
     if (!mosh->pending_resize) {
         mosh->pending_resize = true;
@@ -1163,6 +1209,12 @@ static void mosh_special(Backend *be, SessionSpecialCode code, int arg)
 {
     Mosh *mosh = container_of(be, Mosh, backend);
 
+    if (code == SS_NOP && mosh->terminal) {
+        struct mosh_output_ctx ctx;
+        ctx.mosh = mosh;
+        ctx.wrote = false;
+        cmosh_terminal_render_full(mosh->terminal, mosh_seat_output, &ctx);
+    }
     if (code == SS_NOP && mosh->udp_ready)
         mosh_size(be, (int)mosh->cols, (int)mosh->rows);
 }

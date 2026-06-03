@@ -349,6 +349,106 @@ static int decode_host_bytes(const unsigned char *buf, size_t buflen,
     return 0;
 }
 
+static int decode_host_bytes_apply(const unsigned char *buf, size_t buflen,
+                                   const struct cmosh_host_apply *apply)
+{
+    size_t pos = 0;
+
+    while (pos < buflen) {
+        uint64_t key, len;
+        unsigned int field, wire_type;
+
+        if (cmosh_pb_get_varint(buf, buflen, &pos, &key) != 0)
+            return -1;
+        field = (unsigned int)(key >> 3);
+        wire_type = (unsigned int)(key & 7);
+        if (field == 0)
+            return -1;
+        if (wire_type == 2) {
+            if (cmosh_pb_get_varint(buf, buflen, &pos, &len) != 0 ||
+                len > buflen - pos)
+                return -1;
+            if (field == 4 && apply->hostbytes &&
+                apply->hostbytes(apply->ctx, buf + pos, (size_t)len) != 0)
+                return -1;
+            pos += (size_t)len;
+        } else {
+            if (cmosh_pb_skip_field(buf, buflen, &pos, wire_type) != 0)
+                return -1;
+        }
+    }
+    return 0;
+}
+
+static int decode_host_resize_apply(const unsigned char *buf, size_t buflen,
+                                    const struct cmosh_host_apply *apply)
+{
+    size_t pos = 0;
+    unsigned int cols = 0, rows = 0;
+
+    while (pos < buflen) {
+        uint64_t key, value;
+        unsigned int field, wire_type;
+
+        if (cmosh_pb_get_varint(buf, buflen, &pos, &key) != 0)
+            return -1;
+        field = (unsigned int)(key >> 3);
+        wire_type = (unsigned int)(key & 7);
+        if (field == 0)
+            return -1;
+        if (wire_type == 0) {
+            if (cmosh_pb_get_varint(buf, buflen, &pos, &value) != 0)
+                return -1;
+            if (value > 65535)
+                return -1;
+            if (field == 5)
+                cols = (unsigned int)value;
+            else if (field == 6)
+                rows = (unsigned int)value;
+        } else {
+            if (cmosh_pb_skip_field(buf, buflen, &pos, wire_type) != 0)
+                return -1;
+        }
+    }
+    if (cols && rows && apply->resize)
+        return apply->resize(apply->ctx, cols, rows);
+    return 0;
+}
+
+static int decode_host_echoack_apply(const unsigned char *buf, size_t buflen,
+                                     const struct cmosh_host_apply *apply)
+{
+    size_t pos = 0;
+    uint64_t frame_id = 0;
+    int have_frame_id = 0;
+
+    while (pos < buflen) {
+        uint64_t key, value;
+        unsigned int field, wire_type;
+
+        if (cmosh_pb_get_varint(buf, buflen, &pos, &key) != 0)
+            return -1;
+        field = (unsigned int)(key >> 3);
+        wire_type = (unsigned int)(key & 7);
+        if (field == 0)
+            return -1;
+        if (wire_type == 0) {
+            if (cmosh_pb_get_varint(buf, buflen, &pos, &value) != 0)
+                return -1;
+            if (field == 8) {
+                frame_id = value;
+                have_frame_id = 1;
+            }
+        } else {
+            if (cmosh_pb_skip_field(buf, buflen, &pos, wire_type) != 0)
+                return -1;
+        }
+    }
+    if (have_frame_id && apply->echoack)
+        return apply->echoack(apply->ctx, frame_id);
+    return 0;
+}
+
 static int decode_host_instruction(const unsigned char *buf, size_t buflen,
                                    cmosh_host_output_fn output, void *ctx)
 {
@@ -371,6 +471,48 @@ static int decode_host_instruction(const unsigned char *buf, size_t buflen,
             if (field == 2 &&
                 decode_host_bytes(buf + pos, (size_t)len, output, ctx) != 0)
                 return -1;
+            pos += (size_t)len;
+        } else {
+            if (cmosh_pb_skip_field(buf, buflen, &pos, wire_type) != 0)
+                return -1;
+        }
+    }
+    return 0;
+}
+
+static int decode_host_instruction_apply(const unsigned char *buf,
+                                         size_t buflen,
+                                         const struct cmosh_host_apply *apply)
+{
+    size_t pos = 0;
+
+    while (pos < buflen) {
+        uint64_t key, len;
+        unsigned int field, wire_type;
+
+        if (cmosh_pb_get_varint(buf, buflen, &pos, &key) != 0)
+            return -1;
+        field = (unsigned int)(key >> 3);
+        wire_type = (unsigned int)(key & 7);
+        if (field == 0)
+            return -1;
+        if (wire_type == 2) {
+            if (cmosh_pb_get_varint(buf, buflen, &pos, &len) != 0 ||
+                len > buflen - pos)
+                return -1;
+            if (field == 2) {
+                if (decode_host_bytes_apply(buf + pos, (size_t)len,
+                                            apply) != 0)
+                    return -1;
+            } else if (field == 3) {
+                if (decode_host_resize_apply(buf + pos, (size_t)len,
+                                             apply) != 0)
+                    return -1;
+            } else if (field == 7) {
+                if (decode_host_echoack_apply(buf + pos, (size_t)len,
+                                              apply) != 0)
+                    return -1;
+            }
             pos += (size_t)len;
         } else {
             if (cmosh_pb_skip_field(buf, buflen, &pos, wire_type) != 0)
@@ -405,6 +547,41 @@ int cmosh_decode_host_output_cb(const unsigned char *buf, size_t buflen,
             if (field == 1 &&
                 decode_host_instruction(buf + pos, (size_t)len, output,
                                         ctx) != 0)
+                return -1;
+            pos += (size_t)len;
+        } else {
+            if (cmosh_pb_skip_field(buf, buflen, &pos, wire_type) != 0)
+                return -1;
+        }
+    }
+    return 0;
+}
+
+int cmosh_decode_host_apply(const unsigned char *buf, size_t buflen,
+                            const struct cmosh_host_apply *apply)
+{
+    size_t pos = 0;
+
+    if (!buf || !apply)
+        return -1;
+
+    while (pos < buflen) {
+        uint64_t key, len;
+        unsigned int field, wire_type;
+
+        if (cmosh_pb_get_varint(buf, buflen, &pos, &key) != 0)
+            return -1;
+        field = (unsigned int)(key >> 3);
+        wire_type = (unsigned int)(key & 7);
+        if (field == 0)
+            return -1;
+        if (wire_type == 2) {
+            if (cmosh_pb_get_varint(buf, buflen, &pos, &len) != 0 ||
+                len > buflen - pos)
+                return -1;
+            if (field == 1 &&
+                decode_host_instruction_apply(buf + pos, (size_t)len,
+                                              apply) != 0)
                 return -1;
             pos += (size_t)len;
         } else {
