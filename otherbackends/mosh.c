@@ -70,6 +70,7 @@ struct Mosh {
     bool pending_start_ack;
     bool pending_resize;
     bool logged_state_only_output;
+    int logged_cursor_mode; /* -1 = never; 0 = normal; 1 = application */
 };
 
 static void mosh_free(Backend *be);
@@ -259,9 +260,17 @@ static int mosh_host_output(void *vctx, const unsigned char *diff,
     apply.resize = mosh_terminal_resize;
     apply.ctx = &apply_ctx;
     ret = cmosh_decode_host_apply(diff, diff_len, &apply);
-    if (ret == 0 && apply_ctx.visible)
+    if (ret == 0 && apply_ctx.visible) {
+        int ack = cmosh_terminal_app_cursor_keys(mosh->terminal);
+        if (ack != mosh->logged_cursor_mode) {
+            logevent(mosh->logctx, ack ?
+                     "Mosh terminal: application cursor keys (DECCKM on)" :
+                     "Mosh terminal: normal cursor keys (DECCKM off)");
+            mosh->logged_cursor_mode = ack;
+        }
         ret = cmosh_terminal_render_full(mosh->terminal, mosh_seat_output,
                                          &ctx);
+    }
     if (ret == 0 && !ctx.wrote && !mosh->logged_state_only_output) {
         logevent(mosh->logctx,
                  "Mosh server update contained no raw host-output bytes; "
@@ -983,6 +992,7 @@ static char *mosh_init(const BackendVtable *vt, Seat *seat,
 
     mosh = snew(Mosh);
     memset(mosh, 0, sizeof(*mosh));
+    mosh->logged_cursor_mode = -1;
     mosh->backend.vt = vt;
     mosh->backend.interactor = &mosh->interactor;
     mosh->interactor.vt = &Mosh_interactorvt;

@@ -1275,3 +1275,8 @@ int cmosh_terminal_render_full_to_buffer(struct cmosh_terminal *term,
     *written = ctx.written;
     return ret;
 }
+
+int cmosh_terminal_app_cursor_keys(const struct cmosh_terminal *term)
+{
+    return term ? term->app_cursor_keys : 0;
+}

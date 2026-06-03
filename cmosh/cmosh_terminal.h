@@ -20,5 +20,6 @@ int cmosh_terminal_render_full(struct cmosh_terminal *term,
 int cmosh_terminal_render_full_to_buffer(struct cmosh_terminal *term,
                                          unsigned char *out, size_t outlen,
                                          size_t *written);
+int cmosh_terminal_app_cursor_keys(const struct cmosh_terminal *term);
 
 #endif
