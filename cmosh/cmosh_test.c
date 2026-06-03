@@ -218,7 +218,8 @@ static void test_bootstrap(void)
                                      sizeof(command)) == 0 &&
               strcmp(command,
                      "LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 mosh-server new "
-                     "-4 --no-init -p 60000:61000 2>&1") == 0,
+                     "-4 --no-init -p 60000:61000"
+                     " --terminal-type xterm-256color 2>&1") == 0,
           "build remote command with locale");
     check(cmosh_build_remote_command("mosh-server", 0, "bad locale", 0, 0, 0,
                                      command, sizeof(command)) != 0,

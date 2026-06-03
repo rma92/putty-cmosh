@@ -101,18 +101,25 @@ int cmosh_build_remote_command(const char *server, const char *port_range,
     if (port_range && *port_range) {
         if (locale && *locale) {
             n = snprintf(out, outlen,
-                         "LC_ALL=%s LANG=%s %s new%s%s -p %s 2>&1", locale,
-                         locale, srv, family, init, port_range);
+                         "LC_ALL=%s LANG=%s %s new%s%s -p %s"
+                         " --terminal-type xterm-256color 2>&1",
+                         locale, locale, srv, family, init, port_range);
         } else {
-            n = snprintf(out, outlen, "%s new%s%s -p %s 2>&1", srv, family,
-                         init, port_range);
+            n = snprintf(out, outlen,
+                         "%s new%s%s -p %s --terminal-type xterm-256color"
+                         " 2>&1",
+                         srv, family, init, port_range);
         }
     } else {
         if (locale && *locale) {
-            n = snprintf(out, outlen, "LC_ALL=%s LANG=%s %s new%s%s 2>&1",
+            n = snprintf(out, outlen,
+                         "LC_ALL=%s LANG=%s %s new%s%s"
+                         " --terminal-type xterm-256color 2>&1",
                          locale, locale, srv, family, init);
         } else {
-            n = snprintf(out, outlen, "%s new%s%s 2>&1", srv, family, init);
+            n = snprintf(out, outlen,
+                         "%s new%s%s --terminal-type xterm-256color 2>&1",
+                         srv, family, init);
         }
     }
     if (n < 0 || (size_t)n >= outlen)
