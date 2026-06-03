@@ -226,6 +226,14 @@ Latest checkpoint: user reported no change: mc arrow keys still eventually inser
 * Files touched: `cmosh/cmosh_terminal.c`, `cmosh/cmosh_test.c`, `AGENTS.md`.
 * Checks run: `cmake --build build --target test_cmosh --config Debug -- /m:1`, `.\build\cmosh\Debug\test_cmosh.exe`, `cmake --build build --target putty --config Debug -- /m:1`.
 * Remaining work: continue with live validation and any further renderer edge cases that show up in testing.
+
+## Latest Checkpoint
+
+* Added reverse-video rendering support in `cmosh_terminal`: DEC private `?5` now affects emitted cell attributes during full redraws instead of being tracked but ignored.
+* The renderer now applies global reverse video as an effective inverse attribute when emitting cells, while still restoring normal rendition between rows.
+* Added a regression test that `\033[?5h` causes rendered output to include inverse SGR, and that `\033[?5l` clears the mode again.
+* Also kept the earlier combining-mark repeat fix in place so `CSI b` now repeats the combined grapheme stored in the base cell.
+* Checks run: `cmake --build build --target test_cmosh --config Debug -- /m:1`, `.\build\cmosh\Debug\test_cmosh.exe`, `cmake --build build --target putty --config Debug -- /m:1`.
 * Latest `cmake --build build --target test_cmosh --config Debug` passed after protobuf unknown-field tolerance.
 * Latest `.\build\cmosh\Debug\test_cmosh.exe` passed after protobuf unknown-field tolerance.
 * Latest `cmake --build build --target putty --config Debug` compiled but failed to relink because `build\Debug\putty.exe` was open/locked: `LNK1168: cannot open ... putty.exe for writing`.

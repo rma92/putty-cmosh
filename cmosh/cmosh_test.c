@@ -754,6 +754,24 @@ static void test_terminal(void)
     cmosh_terminal_free(term);
 
     term = cmosh_terminal_new(5, 1);
+    check(cmosh_terminal_apply_bytes(
+              term, (const unsigned char *)"\033[?5hA",
+              strlen("\033[?5hA")) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "\033[7m") &&
+              buffer_contains(out, n, "A"),
+          "terminal reverse video affects rendered output");
+    check(cmosh_terminal_apply_bytes(term, (const unsigned char *)"\033[?5lB",
+                                     strlen("\033[?5lB")) == 0 &&
+              cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
+                                                   &n) == 0 &&
+              buffer_contains(out, n, "B") &&
+              !buffer_contains(out, n, "\033[7mB"),
+          "terminal reverse video clears on mode off");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(5, 1);
     check(cmosh_terminal_apply_bytes(term, (const unsigned char *)"\033=",
                                      2) == 0 &&
               cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),

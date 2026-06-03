@@ -104,6 +104,16 @@ static int cmosh_attr_equal(const struct cmosh_attr *a,
     return memcmp(a, b, sizeof(*a)) == 0;
 }
 
+static struct cmosh_attr cmosh_effective_attr(const struct cmosh_terminal *term,
+                                              const struct cmosh_attr *attr)
+{
+    struct cmosh_attr effective = *attr;
+
+    if (term && term->reverse_video)
+        effective.inverse ^= 1;
+    return effective;
+}
+
 static struct cmosh_cell *cmosh_cell_at(struct cmosh_terminal *term,
                                         unsigned int row, unsigned int col)
 {
@@ -1204,8 +1214,11 @@ int cmosh_terminal_render_full(struct cmosh_terminal *term,
         unsigned int last = 0;
         for (c = 0; c < term->cols; c++) {
             struct cmosh_cell *cell = cmosh_cell_at(term, r, c);
+            struct cmosh_attr effective = cmosh_effective_attr(term,
+                                                                &cell->attr);
             if (cell->width &&
-                (cell->len || !cmosh_attr_equal(&cell->attr, &default_attr)))
+                (cell->len ||
+                 !cmosh_attr_equal(&effective, &current)))
                 last = c + cell->width;
         }
         if (r || cmosh_out(output, ctx, "\033[H") != 0) {
@@ -1214,12 +1227,14 @@ int cmosh_terminal_render_full(struct cmosh_terminal *term,
         }
         for (c = 0; c < last && c < term->cols; c++) {
             struct cmosh_cell *cell = cmosh_cell_at(term, r, c);
+            struct cmosh_attr effective = cmosh_effective_attr(term,
+                                                                &cell->attr);
             if (!cell->width)
                 continue;
-            if (!cmosh_attr_equal(&current, &cell->attr)) {
-                if (cmosh_emit_attr(output, ctx, &cell->attr) != 0)
+            if (!cmosh_attr_equal(&current, &effective)) {
+                if (cmosh_emit_attr(output, ctx, &effective) != 0)
                     return -1;
-                current = cell->attr;
+                current = effective;
             }
             if (cell->len) {
                 if (output(ctx, (const unsigned char *)cell->text,
