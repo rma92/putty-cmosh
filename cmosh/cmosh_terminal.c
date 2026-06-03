@@ -1189,9 +1189,9 @@ int cmosh_terminal_render_full(struct cmosh_terminal *term,
     if (term->app_cursor_keys &&
         cmosh_out(output, ctx, "\033[?1h") != 0)
         return -1;
-    if (term->app_keypad_keys &&
-        cmosh_out(output, ctx, "\033=") != 0)
-        return -1;
+    /* Do not restore DECKPAM (\033=): PuTTY remaps numpad cursor keys to
+     * application-keypad sequences when app_keypad_keys is set, breaking
+     * mc and other apps that expect \033OA from standard cursor keys. */
     for (r = 0; r < term->rows; r++) {
         unsigned int last = 0;
         for (c = 0; c < term->cols; c++) {

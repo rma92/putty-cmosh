@@ -711,15 +711,16 @@ static void test_terminal(void)
                                      2) == 0 &&
               cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
                                                    &n) == 0 &&
-              buffer_contains(out, n, "\033="),
-          "terminal render restores application keypad mode");
+              !buffer_contains(out, n, "\033=") &&
+              buffer_contains(out, n, "\033>"),
+          "terminal render does not restore application keypad mode");
     check(cmosh_terminal_apply_bytes(term, (const unsigned char *)"\033>",
                                      2) == 0 &&
               cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
                                                    &n) == 0 &&
               !buffer_contains(out, n, "\033=") &&
               buffer_contains(out, n, "\033>"),
-          "terminal render restores normal keypad mode");
+          "terminal render stays in normal keypad mode");
     cmosh_terminal_free(term);
 
     term = cmosh_terminal_new(5, 3);
