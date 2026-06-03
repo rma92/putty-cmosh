@@ -57,6 +57,7 @@ struct Mosh {
     uint64_t last_input_diag_ms;
     uint64_t last_recv_diag_ms;
     uint64_t last_start_ack_retry_ms;
+    uint64_t last_key_diag_ms;
     uint64_t last_udp_send_fail_log_ms;
     uint64_t last_udp_reopen_attempt_ms;
     bool udp_started;
@@ -84,6 +85,68 @@ static bool mosh_try_send_start_ack(Mosh *mosh, unsigned long now);
 static bool mosh_try_send_resize(Mosh *mosh, uint64_t now);
 static void mosh_try_send_pending(Mosh *mosh);
 static bool mosh_sendok(Backend *be);
+static bool mosh_interval_due(uint64_t last_ms, unsigned long now_ms,
+                              unsigned interval_ms);
+
+static int mosh_find_arrow_sequence(const unsigned char *buf, size_t len,
+                                    char *prefix, char *key)
+{
+    size_t i;
+
+    if (!buf)
+        return 0;
+    for (i = 0; i + 2 < len; i++) {
+        if (buf[i] == 0x1b && (buf[i + 1] == '[' || buf[i + 1] == 'O') &&
+            buf[i + 2] >= 'A' && buf[i + 2] <= 'D') {
+            if (prefix)
+                *prefix = (char)buf[i + 1];
+            if (key)
+                *key = (char)buf[i + 2];
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void mosh_force_application_cursor(unsigned char *buf, size_t len)
+{
+    size_t i;
+
+    if (!buf)
+        return;
+    for (i = 0; i + 2 < len; i++) {
+        if (buf[i] == 0x1b && buf[i + 1] == '[' &&
+            buf[i + 2] >= 'A' && buf[i + 2] <= 'D')
+            buf[i + 1] = 'O';
+    }
+}
+
+static void mosh_log_key_diag(Mosh *mosh, const unsigned char *in,
+                              size_t inlen, const unsigned char *out,
+                              size_t outlen, unsigned long now)
+{
+    char in_prefix = 0, in_key = 0, out_prefix = 0, out_key = 0;
+    char *msg;
+
+    if (!mosh_find_arrow_sequence(in, inlen, &in_prefix, &in_key) &&
+        !mosh_find_arrow_sequence(out, outlen, &out_prefix, &out_key))
+        return;
+    if (!mosh_interval_due(mosh->last_key_diag_ms, now, 1000U))
+        return;
+    mosh->last_key_diag_ms = now;
+    if (!out_prefix)
+        mosh_find_arrow_sequence(out, outlen, &out_prefix, &out_key);
+    msg = dupprintf("Mosh key diag: input ESC %c %c, queued ESC %c %c, "
+                    "DECCKM=%d DECKPAM=%d alt=%d outer-app-cursor=%d",
+                    in_prefix ? in_prefix : '?', in_key ? in_key : '?',
+                    out_prefix ? out_prefix : '?', out_key ? out_key : '?',
+                    cmosh_terminal_app_cursor_keys(mosh->terminal),
+                    cmosh_terminal_app_keypad_keys(mosh->terminal),
+                    cmosh_terminal_using_alternate(mosh->terminal),
+                    !conf_get_bool(mosh->conf, CONF_no_applic_c));
+    logevent(mosh->logctx, msg);
+    sfree(msg);
+}
 
 static bool mosh_interval_due(uint64_t last_ms, unsigned long now_ms,
                               unsigned interval_ms)
@@ -1166,6 +1229,9 @@ static void mosh_try_send_pending(Mosh *mosh)
 static void mosh_send(Backend *be, const char *buf, size_t len)
 {
     Mosh *mosh = container_of(be, Mosh, backend);
+    const unsigned char *translated;
+    unsigned char *translated_alloc = NULL;
+    size_t translated_len;
 
     if (mosh->shutdown || !len)
         return;
@@ -1176,7 +1242,25 @@ static void mosh_send(Backend *be, const char *buf, size_t len)
         return;
     }
 
-    memcpy(strbuf_append(mosh->pending_input, len), buf, len);
+    if (conf_get_bool(mosh->conf, CONF_no_applic_c)) {
+        translated = (const unsigned char *)buf;
+        translated_len = len;
+    } else {
+        translated_alloc = snewn(len, unsigned char);
+        if (cmosh_terminal_translate_input(
+                mosh->terminal, (const unsigned char *)buf, len,
+                translated_alloc, len, &translated_len) != 0) {
+            sfree(translated_alloc);
+            return;
+        }
+        mosh_force_application_cursor(translated_alloc, translated_len);
+        translated = translated_alloc;
+    }
+    mosh_log_key_diag(mosh, (const unsigned char *)buf, len, translated,
+                      translated_len, GETTICKCOUNT());
+    memcpy(strbuf_append(mosh->pending_input, translated_len),
+           translated, translated_len);
+    sfree(translated_alloc);
     mosh_try_send_pending(mosh);
 }
 

@@ -16,6 +16,12 @@ Latest checkpoint: fixed full-redraw rendering of colored blank cells, reported 
 
 Latest checkpoint: user confirmed `dialog` works. Added cmosh terminal state for DECCKM application cursor keys (`CSI ? 1 h/l`) and DECKPAM/DECKPNM application keypad mode (`ESC =`/`ESC >`). Full redraw now resets PuTTY's terminal keyboard modes to normal and then restores the cmosh model's active modes, so full-screen apps such as `mc` can switch arrow-key encoding even though raw host output is no longer forwarded. Focused tests cover cursor/keypad mode restoration.
 
+Latest checkpoint: user reported mc arrow keys still unchanged while Lynx, htop, and dialog work. Current hypothesis: mc on Gentoo/xterm-256color enters terminfo keypad/application cursor mode and expects `ESC O A-D`, but PuTTY may still hand the Mosh backend normal cursor bytes `ESC [ A-D`. Added a Mosh-side input translation path keyed off the cmosh terminal model's DECCKM state: when application cursor keys are active, normal arrow sequences are converted to application arrow sequences before entering the Mosh input/retransmission queue. This respects PuTTY's `NoApplicationCursors` setting. Focused tests cover normal-mode preservation and application-mode translation.
+
+Latest checkpoint: user reported mc still fails, with command-line arrow presses eventually inserting final letters (`A/B/C/D`) after about 8 presses and temporarily disrupting backspace. That points to mc receiving an unrecognised escape sequence, likely normal cursor bytes while expecting application cursor bytes. Broadened the Mosh-side input translation trigger: translate `ESC [ A-D` to `ESC O A-D` if either DECCKM application cursor mode or DECKPAM keypad-transmit mode is active in the cmosh terminal model. This covers the case where mc/mosh exposes `ESC =` but not `CSI ? 1 h` through the raw hostbytes path. Added a focused test for keypad-mode-only cursor translation.
+
+Latest checkpoint: user reported no change: mc arrow keys still eventually insert `A/B/C/D`, each inserted letter appears to trigger a full-screen redraw that appends one screen of scrollback, htop Up/Down fail while Left/Right work, and Lynx/Vim arrows work. Added alternate-screen integration: full renders now emit `?1049h/l` on cmosh alternate-screen transitions so PuTTY's scrollback should not grow during full-screen redraws. Also treats cmosh alternate-screen state as a signal to translate normal cursor keys to application cursor keys. Added a throttled Event Log diagnostic for arrow input showing original bytes, queued bytes, and DECCKM/DECKPAM/alternate mode flags. Focused tests cover alternate-screen cursor translation and render `?1049h/l` emission.
+
 ## Files Recently Touched
 
 * `cmosh/cmosh_client.c`
@@ -100,6 +106,7 @@ Latest checkpoint: user confirmed `dialog` works. Added cmosh terminal state for
 * Server shutdown reporting now comes from the committed client server state, not directly from an ignored/stale packet's `new_num`. The queue selector also handles the shutdown sentinel `UINT64_MAX` as an applicable next state.
 * ACK-only server transitions with no host-output diff now use the retained server-diff commit path, so server state, echo timestamp, ACK, and throwaway metadata are applied atomically with other accepted transitions.
 * Duplicate server packets now retry the retained server-diff queue even when no terminal-output callback is supplied. This lets queued ACK-only/no-diff transitions drain and trim retransmission state during duplicate recovery, while real output diffs still fail if there is no output sink.
+* For native PuTTY Mosh, DECCKM affects outbound cursor-key bytes at the Mosh backend boundary as well as in PuTTY's terminal parser. If the cmosh model says application cursor mode is active, `ESC [ A-D` is translated to `ESC O A-D` before cmosh input packetization, unless `NoApplicationCursors` is configured.
 
 ## Protocol Invariants
 
@@ -164,6 +171,18 @@ Latest checkpoint: user confirmed `dialog` works. Added cmosh terminal state for
 * Latest: `cmake --build build --target cmosh --config Debug` - passed, with existing MSBuild manifest warning.
 * Latest: `cmake --build build --target putty --config Debug` - passed, with existing MSBuild manifest warning.
 * Latest: `git diff --check` - passed; Git reported only existing LF-to-CRLF working-copy warnings.
+* Latest mc-arrow pass: `cmake --build build --target test_cmosh --config Debug -- /m:1` - passed.
+* Latest mc-arrow pass: `.\build\cmosh\Debug\test_cmosh.exe` - passed.
+* Latest mc-arrow pass: `cmake --build build --target otherbackends --config Debug -- /m:1` - passed.
+* Latest mc-arrow pass: `cmake --build build --target putty --config Debug -- /m:1` - passed, with existing MSBuild manifest warning.
+* Latest mc-arrow keypad-mode pass: `cmake --build build --target test_cmosh --config Debug -- /m:1` - passed.
+* Latest mc-arrow keypad-mode pass: `.\build\cmosh\Debug\test_cmosh.exe` - passed.
+* Latest mc-arrow keypad-mode pass: `cmake --build build --target otherbackends --config Debug -- /m:1` - passed.
+* Latest mc-arrow keypad-mode pass: `cmake --build build --target putty --config Debug -- /m:1` - passed, with existing MSBuild manifest warning.
+* Latest mc/htop arrow diagnostic pass: `cmake --build build --target test_cmosh --config Debug -- /m:1` - passed.
+* Latest mc/htop arrow diagnostic pass: `.\build\cmosh\Debug\test_cmosh.exe` - passed.
+* Latest mc/htop arrow diagnostic pass: `cmake --build build --target otherbackends --config Debug -- /m:1` - passed.
+* Latest mc/htop arrow diagnostic pass: `cmake --build build --target putty --config Debug -- /m:1` - passed, with existing MSBuild manifest warning.
 
 * Decoded transport instructions must match `CMOSH_PROTOCOL_VERSION` before client state, ACK trimming, or host output can be affected.
 * No-diff server-state transitions still advance state and commit retained ACK/throwaway metadata. Stale no-diff transitions must not advance server state, though their authenticated ACK/throwaway fields may still trim input after high-level validation.
@@ -339,7 +358,24 @@ Latest checkpoint: user confirmed `dialog` works. Added cmosh terminal state for
 
 ## Exact Next Step
 
+Superseded by latest mc-arrow pass: backend-side DECCKM input translation is now implemented. Run `build\Debug\putty.exe` with a Mosh session, start `mc`, and test Up/Down/Left/Right navigation. If arrows still fail, capture PuTTY Event Log lines around mc startup, especially "Mosh terminal: application cursor keys (DECCKM on/off)" and "Mosh server update contained no raw host-output bytes".
+
 Run `build\Debug\putty.exe` with a mosh session, start mc, and check PuTTY Event Log (right-click title bar → Event Log) for:
 1. "Mosh terminal: application cursor keys (DECCKM on)" — if this appears, our DECCKM tracking is working and the arrow key issue is downstream of key generation. Add further diagnostics or test whether TERM on the server is set correctly.
 2. "Mosh terminal: normal cursor keys (DECCKM off)" only (no "DECCKM on") — mc's smkx does not include `\033[?1h`. Fix: modify `cmosh_build_remote_command` in `cmosh/cmosh_bootstrap.c` to pass `--terminal-type xterm-256color` (or equivalent TERM with `smkx=\E[?1h\E=`) to mosh-server. This is the most likely root cause if dialog/lynx/vim work but mc does not.
 3. "Mosh server update contained no raw host-output bytes" — the mosh server is sending display updates without raw bytes; the terminal-state renderer path is needed for those updates.
+
+## Latest mc Arrow Checkpoint
+
+The user captured an Event Log while running mc: `Mosh key diag: input ESC [ B, queued ESC [ B, DECCKM=0 DECKPAM=0 alt=0`. This supersedes the old TERM/remote-DECCKM hypothesis. It shows the backend was still sending normal cursor keys while mc was active because the remote app's cursor/alternate mode was not visible in cmosh raw host-output parsing.
+
+Upstream Mosh's `STMClient::init()` puts the outer terminal in application-cursor-key mode unconditionally. Current pending fix follows that model: cmosh full redraws now emit `\033[?1h`, and `otherbackends/mosh.c` forces arrow input from `ESC [ A-D` to `ESC O A-D` before queuing input, unless PuTTY's "Disable application cursor keys mode" setting is enabled. The key diagnostic now includes `outer-app-cursor=...`.
+
+Latest checks after this fix:
+* `cmake --build build --target test_cmosh --config Debug -- /m:1` passed.
+* `build\cmosh\Debug\test_cmosh.exe` passed.
+* `cmake --build build --target otherbackends --config Debug -- /m:1` passed.
+* `cmake --build build --target putty --config Debug -- /m:1` passed and produced `build\Debug\putty.exe`.
+* `git diff --check` passed with only expected CRLF conversion warnings.
+
+Exact next live test: run `build\Debug\putty.exe`, start a Mosh session, run `mc`, and test arrows. The expected Event Log signal is `queued ESC O B` (or input already `ESC O B`) with `outer-app-cursor=1`. If mc still fails while the diagnostic says `queued ESC O ...`, investigate packet framing/timing or server-side input handling next, because cursor-sequence selection is then no longer the failing layer.

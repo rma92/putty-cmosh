@@ -701,9 +701,44 @@ static void test_terminal(void)
                                      5) == 0 &&
               cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
                                                    &n) == 0 &&
-              !buffer_contains(out, n, "\033[?1h") &&
+              buffer_contains(out, n, "\033[?1h") &&
               buffer_contains(out, n, "\033[?1l"),
-          "terminal render restores normal cursor mode");
+          "terminal render keeps local application cursor mode");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(5, 1);
+    check(cmosh_terminal_translate_input(
+              term, (const unsigned char *)"\033[A", 3, out, sizeof(out),
+              &n) == 0 &&
+              n == 3 && memcmp(out, "\033[A", 3) == 0,
+          "terminal input preserves normal cursor key");
+    check(cmosh_terminal_apply_bytes(term, (const unsigned char *)"\033[?1h",
+                                     5) == 0 &&
+              cmosh_terminal_translate_input(
+                  term, (const unsigned char *)"\033[A\033OB", 6, out,
+                  sizeof(out), &n) == 0 &&
+              n == 6 && memcmp(out, "\033OA\033OB", 6) == 0,
+          "terminal input translates application cursor key");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(5, 1);
+    check(cmosh_terminal_apply_bytes(term, (const unsigned char *)"\033=",
+                                     2) == 0 &&
+              cmosh_terminal_translate_input(
+                  term, (const unsigned char *)"\033[D", 3, out,
+                  sizeof(out), &n) == 0 &&
+              n == 3 && memcmp(out, "\033OD", 3) == 0,
+          "terminal input translates keypad-mode cursor key");
+    cmosh_terminal_free(term);
+
+    term = cmosh_terminal_new(5, 1);
+    check(cmosh_terminal_apply_bytes(term, (const unsigned char *)"\033[?1049h",
+                                     8) == 0 &&
+              cmosh_terminal_translate_input(
+                  term, (const unsigned char *)"\033[B", 3, out,
+                  sizeof(out), &n) == 0 &&
+              n == 3 && memcmp(out, "\033OB", 3) == 0,
+          "terminal input translates alternate-screen cursor key");
     cmosh_terminal_free(term);
 
     term = cmosh_terminal_new(5, 1);
@@ -740,6 +775,7 @@ static void test_terminal(void)
               0 &&
               cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
                                                    &n) == 0 &&
+              buffer_contains(out, n, "\033[?1049h") &&
               buffer_contains(out, n, "alt") &&
               !buffer_contains(out, n, "main"),
           "terminal alternate screen enter renders alternate buffer");
@@ -747,6 +783,7 @@ static void test_terminal(void)
                                      8) == 0 &&
               cmosh_terminal_render_full_to_buffer(term, out, sizeof(out),
                                                    &n) == 0 &&
+              buffer_contains(out, n, "\033[?1049l") &&
               buffer_contains(out, n, "main") &&
               !buffer_contains(out, n, "alt"),
           "terminal alternate screen exit restores primary buffer");

@@ -63,6 +63,7 @@ struct cmosh_terminal {
     int pending_wrap;
     int reverse_video;
     int using_alternate;
+    int rendered_alternate;
     int g0_acs;
     unsigned char charset_select;
     struct cmosh_attr attr;
@@ -1183,11 +1184,16 @@ int cmosh_terminal_render_full(struct cmosh_terminal *term,
 
     if (!term || !output)
         return -1;
+    if (term->using_alternate != term->rendered_alternate) {
+        if (cmosh_out(output, ctx, term->using_alternate ?
+                      "\033[?1049h" : "\033[?1049l") != 0)
+            return -1;
+        term->rendered_alternate = term->using_alternate;
+    }
     if (cmosh_out(output, ctx, "\033[?25l\033[?1l\033>\033[0m"
                             "\033[H\033[2J") != 0)
         return -1;
-    if (term->app_cursor_keys &&
-        cmosh_out(output, ctx, "\033[?1h") != 0)
+    if (cmosh_out(output, ctx, "\033[?1h") != 0)
         return -1;
     /* Do not restore DECKPAM (\033=): PuTTY remaps numpad cursor keys to
      * application-keypad sequences when app_keypad_keys is set, breaking
@@ -1279,4 +1285,47 @@ int cmosh_terminal_render_full_to_buffer(struct cmosh_terminal *term,
 int cmosh_terminal_app_cursor_keys(const struct cmosh_terminal *term)
 {
     return term ? term->app_cursor_keys : 0;
+}
+
+int cmosh_terminal_app_keypad_keys(const struct cmosh_terminal *term)
+{
+    return term ? term->app_keypad_keys : 0;
+}
+
+int cmosh_terminal_using_alternate(const struct cmosh_terminal *term)
+{
+    return term ? term->using_alternate : 0;
+}
+
+int cmosh_terminal_translate_input(const struct cmosh_terminal *term,
+                                   const unsigned char *in, size_t inlen,
+                                   unsigned char *out, size_t outlen,
+                                   size_t *written)
+{
+    size_t ipos = 0, opos = 0;
+    int app_cursor = cmosh_terminal_app_cursor_keys(term) ||
+        cmosh_terminal_app_keypad_keys(term) ||
+        cmosh_terminal_using_alternate(term);
+
+    if (!in || !out || !written)
+        return -1;
+    while (ipos < inlen) {
+        unsigned char ch = in[ipos++];
+
+        if (ch == 0x1b && app_cursor && ipos + 1 < inlen &&
+            in[ipos] == '[' && in[ipos + 1] >= 'A' && in[ipos + 1] <= 'D') {
+            if (opos + 3 > outlen)
+                return -1;
+            out[opos++] = 0x1b;
+            out[opos++] = 'O';
+            out[opos++] = in[ipos + 1];
+            ipos += 2;
+        } else {
+            if (opos + 1 > outlen)
+                return -1;
+            out[opos++] = ch;
+        }
+    }
+    *written = opos;
+    return 0;
 }
